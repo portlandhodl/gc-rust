@@ -1,0 +1,8 @@
+[package]
+name = "gx-textured-cube"
+version = "0.1.0"
+edition = "2021"
+description = "gc-rust example: rotating cube with a procedurally generated texture"
+
+[dependencies]
+gc-std = { path = "../../crates/gc-std" }

@@ -1,0 +1,8 @@
+[workspace]
+resolver = "2"
+members = ["crates/gc-std", "examples/*"]
+
+[profile.release]
+opt-level = "s"
+debug = true
+overflow-checks = false

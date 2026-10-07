@@ -1,0 +1,8 @@
+[package]
+name = "heap-strings"
+version = "0.1.0"
+edition = "2021"
+description = "gc-rust example: heap allocation, String, Vec and maps on the GameCube"
+
+[dependencies]
+gc-std = { path = "../../crates/gc-std" }

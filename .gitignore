@@ -1,0 +1,7 @@
+/target
+/dist
+*.elf
+*.dol
+*.o
+*.d
+.map

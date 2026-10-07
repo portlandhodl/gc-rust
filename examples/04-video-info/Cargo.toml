@@ -1,0 +1,8 @@
+[package]
+name = "video-info"
+version = "0.1.0"
+edition = "2021"
+description = "gc-rust example: query the detected video mode"
+
+[dependencies]
+gc-std = { path = "../../crates/gc-std" }

@@ -1,0 +1,34 @@
+{
+  "arch": "powerpc",
+  "cpu": "750",
+  "data-layout": "E-m:e-p:32:32-Fn32-i64:64-n32",
+  "llvm-target": "powerpc-unknown-none",
+  "target-endian": "big",
+  "target-pointer-width": 32,
+  "target-c-int-width": 32,
+  "os": "none",
+  "env": "newlib",
+  "vendor": "nintendo",
+  "executables": true,
+  "relocation-model": "static",
+  "linker": "powerpc-eabi-gcc",
+  "linker-flavor": "gnu-cc",
+  "pre-link-args": {
+    "gnu-cc": [
+      "-mogc",
+      "-mcpu=750",
+      "-meabi",
+      "-mhard-float"
+    ]
+  },
+  "panic-strategy": "abort",
+  "max-atomic-width": 32,
+  "function-sections": true,
+  "features": "+fpu",
+  "metadata": {
+    "description": "Nintendo GameCube (Gekko / PowerPC 750CXe) using devkitPPC + libogc",
+    "host_tools": false,
+    "std": false,
+    "tier": 3
+  }
+}

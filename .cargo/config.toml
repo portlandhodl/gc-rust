@@ -1,0 +1,12 @@
+# Build configuration for Nintendo GameCube (Gekko / PowerPC 750CXe).
+#
+# `core` and `alloc` are built from source with `-Z build-std` because there is
+# no prebuilt std for this target. Linking is done by devkitPPC's gcc
+# (`-mogc` pulls in the libogc startfiles, linker script and libs).
+
+[build]
+target = "powerpc-gekko-none-eabi.json"
+
+[unstable]
+build-std = ["core", "alloc"]
+json-target-spec = true
