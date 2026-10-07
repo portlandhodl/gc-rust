@@ -58,7 +58,7 @@ const UV: [[f32; 2]; 4] = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
 extern "C" fn main() -> i32 {
     let gc = gc_std::init();
     let gx = gc.into_gx();
-    gx.set_clear_color(gc_std::ffi::GXColor::rgb(24, 30, 24));
+    gx.set_clear_color(gc_std::GXColor::rgb(24, 30, 24));
 
     let proj = gu::perspective(60.0, 1.33, 1.0, 100.0);
     gx.load_perspective(&proj);

@@ -1,0 +1,6 @@
+[build]
+target-dir = "target-host"
+rustflags = []
+
+[unstable]
+build-std = ["std", "core", "alloc"]

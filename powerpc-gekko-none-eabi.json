@@ -7,26 +7,27 @@
   "target-pointer-width": 32,
   "target-c-int-width": 32,
   "os": "none",
-  "env": "newlib",
+  "env": "",
   "vendor": "nintendo",
   "executables": true,
   "relocation-model": "static",
-  "linker": "powerpc-eabi-gcc",
-  "linker-flavor": "gnu-cc",
-  "pre-link-args": {
-    "gnu-cc": [
-      "-mogc",
-      "-mcpu=750",
-      "-meabi",
-      "-mhard-float"
-    ]
-  },
+  "linker-flavor": "gnu-lld",
+  "linker": "rust-lld",
   "panic-strategy": "abort",
+  "default-uwtable": false,
+  "no-default-libraries": true,
   "max-atomic-width": 32,
   "function-sections": true,
   "features": "+fpu",
+  "pre-link-args": {
+    "gnu-lld": [
+      "--entry=_start",
+      "--gc-sections",
+      "--no-undefined"
+    ]
+  },
   "metadata": {
-    "description": "Nintendo GameCube (Gekko / PowerPC 750CXe) using devkitPPC + libogc",
+    "description": "Nintendo GameCube (Gekko / PowerPC 750CXe), self-hosted pure-Rust toolchain",
     "host_tools": false,
     "std": false,
     "tier": 3

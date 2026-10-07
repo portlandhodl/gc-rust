@@ -1,51 +1,30 @@
 //! # gc-std
 //!
-//! The "standard library" for writing Nintendo GameCube software in Rust.
+//! The standard-library layer for Nintendo GameCube development in Rust —
+//! **no C toolchain, no libogc binary, no devkitPro.**
 //!
-//! This crate sits on top of devkitPro's [libogc] and provides:
+//! * 100% Rust: startup code (`crt0`), runtime glue, MMIO drivers for the
+//!   VI (video), SI (controllers), the GX graphics processor, and a heap
+//!   allocator enabling the full `alloc` crate (`Vec`, `String`, `Box`,
+//!   `format!`, ...).
+//! * Console text over the framebuffer: [`print!`] / [`println!`].
+//! * 3D graphics through the [`gx`] module (immediate-mode rendering).
+//! * Matrix math ([`gu`]), video mode control ([`video`]), and controller
+//!   input ([`input`]).
 //!
-//! * the Rust runtime glue (`#[panic_handler]`, `#[alloc_error_handler]`,
-//!   a malloc-backed `#[global_allocator]`) so `core` and `alloc` work —
-//!   `Vec`, `String`, `Box`, `format!` and friends are all usable;
-//! * a text console over [`console`] with [`print!`] / [`println!`];
-//! * safe wrappers around the console hardware: [`video`], controller
-//!   [`input`], the [`gx`] graphics processor and [`gu`] matrix math;
-//! * [`system::exit`] to return to the loader.
-//!
-//! Initialization comes in two flavors:
+//! Entry point convention is the same as libogc-based projects: define
 //!
 //! ```rust,no_run
-//! #![no_std]
-//! #![no_main]
-//! use gc_std::{input::button, println};
-//!
 //! #[no_mangle]
 //! extern "C" fn main() -> i32 {
-//!     // Text console mode (println! etc.)
 //!     let mut gc = gc_std::init();
 //!     gc.enable_console();
-//!     println!("Hello from Rust!");
-//!
-//!     loop {
-//!         gc_std::video::wait_vsync();
-//!         gc_std::input::scan();
-//!         if gc_std::input::buttons_down(0).contains(button::START) {
-//!             gc_std::system::exit(0);
-//!         }
-//!     }
+//!     println!("Hello, GameCube!");
+//!     loop {}
 //! }
 //! ```
 //!
-//! or for 3D:
-//!
-//! ```rust,no_run
-//! # let _ = |gc: gc_std::Gc| {
-//!     // GX accelerated graphics mode
-//!     let gx = gc.into_gx();
-//! # };
-//! ```
-//!
-//! [libogc]: https://github.com/devkitPro/libogc
+//! inside a `#![no_std] #![no_main]` binary.
 
 #![no_std]
 #![feature(alloc_error_handler)]
@@ -53,104 +32,110 @@
 extern crate alloc;
 
 pub mod console;
-pub mod ffi;
+pub mod gctypes;
 pub mod gu;
 pub mod gx;
+mod heap;
+pub mod hw;
 pub mod input;
 pub mod system;
 pub mod video;
 
-mod allocator;
+mod crt0;
+mod font;
 mod runtime;
 
-use core::sync::atomic::{AtomicU32, Ordering};
-use video::Video;
+#[doc(no_inline)]
+pub use gctypes::{GXColor, GXRModeObj, Mtx as RawMtx, Mtx44};
+pub use video::Video;
 
-const UNINITIALIZED: u32 = 0;
-const BASE_INITIALIZED: u32 = 1;
-const CONSOLE_ENABLED: u32 = 2;
-const _GX_ENABLED: u32 = 3;
+use core::sync::atomic::{AtomicBool, Ordering};
 
-static INIT_STATE: AtomicU32 = AtomicU32::new(UNINITIALIZED);
+static INITIALIZED: AtomicBool = AtomicBool::new(false);
+static CONSOLE_ON: AtomicBool = AtomicBool::new(false);
+static GX_ON: AtomicBool = AtomicBool::new(false);
 
-/// Token proving the console hardware has been initialized.
-///
-/// Owned handle to the machine; decide early whether you want a text
-/// console ([`Gc::enable_console`]) or the GPU ([`Gc::into_gx`]).
+static mut CONSOLE: Option<console::Console> = None;
+
+const CONSOLE_MARGIN: usize = 20;
+
+/// Handle to the initialized machine.
 pub struct Gc {
     video: Video,
     _not_send: core::marker::PhantomData<*const ()>,
 }
 
 impl Gc {
-    /// Access to the video subsystem (mode info, framebuffer, vsync).
     pub fn video(&self) -> &Video {
         &self.video
     }
 
-    /// Install the framebuffer text console (`print!`/`println!` start
-    /// producing visible output) and start the display.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the console was already enabled.
+    /// Start the framebuffer text console. `print!`/`println!` output will
+    /// now be visible. Consumes the "text or graphics" choice.
     pub fn enable_console(&mut self) -> &mut Self {
-        if INIT_STATE
-            .compare_exchange(
-                BASE_INITIALIZED,
-                CONSOLE_ENABLED,
-                Ordering::Acquire,
-                Ordering::Relaxed,
-            )
-            .is_err()
-        {
+        if CONSOLE_ON.swap(true, Ordering::AcqRel) || GX_ON.load(Ordering::Acquire) {
             panic!("gc_std: console already enabled (or GX in use)");
         }
-        console::init(&self.video);
-        self.video.show();
+        let con = console::Console::new(&self.video, CONSOLE_MARGIN);
+        unsafe {
+            *(&raw mut CONSOLE) = Some(con);
+        }
         self
     }
 
-    /// Hand the machine over to the GX graphics processor.
-    ///
-    /// Performs full GX pipeline bring-up (command FIFO, copy setup,
-    /// viewport/scissor) pointed at the allocated framebuffer, and starts
-    /// the display.
+    /// Initialize the GX 3D pipeline. `gc.video()` remains available for
+    /// the low-level pieces; 3D rendering goes through the returned context.
     pub fn into_gx(self) -> gx::Context {
-        INIT_STATE.store(_GX_ENABLED, Ordering::Release);
-        let ctx = gx::init(Video::clone_handle(&self.video));
-        self.video.show();
-        ctx
+        if GX_ON.swap(true, Ordering::AcqRel) || CONSOLE_ON.load(Ordering::Acquire) {
+            panic!("gc_std: GX already in use (or console enabled)");
+        }
+        gx::init(&self.video)
     }
 }
 
-/// Initialize the GameCube: video hardware, controller ports and the
-/// external framebuffer.
-///
-/// Afterwards choose your output path: [`Gc::enable_console`] for text or
-/// [`Gc::into_gx`] for 3D graphics.
-///
-/// # Panics
-///
-/// Panics if called more than once.
+/// Initialize the machine (video hardware, controller ports, framebuffer,
+/// heap). Exactly once.
 pub fn init() -> Gc {
-    if INIT_STATE
-        .compare_exchange(
-            UNINITIALIZED,
-            BASE_INITIALIZED,
-            Ordering::Acquire,
-            Ordering::Relaxed,
-        )
-        .is_err()
-    {
-        panic!("gc_std::init() called more than once");
+    if INITIALIZED.swap(true, Ordering::AcqRel) {
+        panic!("gc_std::init() called twice");
     }
-
-    let video = video::init();
     input::init();
-
+    let video = video::init();
     Gc {
         video,
         _not_send: core::marker::PhantomData,
     }
+}
+
+// internal: get the console for print macros (None until enable_console)
+#[doc(hidden)]
+pub fn _console() -> &'static mut Option<console::Console> {
+    unsafe { &mut *core::ptr::addr_of_mut!(CONSOLE) }
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __console_print_impl {
+    ($($arg:tt)*) => {{
+        if let Some(con) = $crate::_console().as_mut() {
+            use core::fmt::Write;
+            let _ = con.write_fmt(core::format_args!($($arg)*));
+        }
+    }};
+}
+
+/// Print to the framebuffer console (if enabled).
+#[macro_export]
+macro_rules! print {
+    ($($arg:tt)*) => { $crate::__console_print_impl!($($arg)*) };
+}
+
+/// Print to the framebuffer console, with newline.
+#[macro_export]
+macro_rules! println {
+    () => { $crate::print!("\n") };
+    ($($arg:tt)*) => {{
+        $crate::__console_print_impl!($($arg)*);
+        $crate::__console_print_impl!("\n");
+    }};
 }

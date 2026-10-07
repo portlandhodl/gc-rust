@@ -2,7 +2,7 @@
 name = "pad-input"
 version = "0.1.0"
 edition = "2021"
-description = "gc-rust example: read GameCube controller buttons and analog inputs"
+description = "gc-rust example: 02-pad-input"
 
 [dependencies]
 gc-std = { path = "../../crates/gc-std" }

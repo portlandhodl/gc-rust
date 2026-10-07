@@ -2,7 +2,7 @@
 name = "gx-triangle"
 version = "0.1.0"
 edition = "2021"
-description = "gc-rust example: rotating colored triangle in immediate mode"
+description = "gc-rust example: 07-gx-triangle"
 
 [dependencies]
 gc-std = { path = "../../crates/gc-std" }

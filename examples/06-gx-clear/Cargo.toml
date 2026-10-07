@@ -2,7 +2,7 @@
 name = "gx-clear"
 version = "0.1.0"
 edition = "2021"
-description = "gc-rust example: GX bring-up, clear the screen to a pulsing color"
+description = "gc-rust example: 06-gx-clear"
 
 [dependencies]
 gc-std = { path = "../../crates/gc-std" }

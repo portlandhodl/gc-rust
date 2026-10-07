@@ -1,44 +1,15 @@
-# gc-rust — build system for the GameCube Rust examples.
+# gc-rust — pure-Rust GameCube toolchain. No devkitPro, no libogc, no C.
 #
-# Requires devkitPro (devkitPPC + libogc + tools) with the usual
-# environment variables:
-#   export DEVKITPRO=/opt/devkitpro
-#   export DEVKITPPC=/opt/devkitpro/devkitPPC
-#
-#   make                  build every example into dist/*.dol
-#   make hello-console    build one example (any name from `make list`)
-#   make list             list example names
-#   make run EXAMPLE=...
-#                         build + run one example in Dolphin (if installed)
+#   make            build every example into dist/*.dol
+#   make list       list the example names
+#   make <name>     build one example (e.g. make gx-cube)
+#   make run EXAMPLE=hello-console
+#                   build + run in Dolphin
 #   make clean
-
-ifeq ($(strip $(DEVKITPRO)),)
-$(error "Please set DEVKITPRO in your environment, e.g. export DEVKITPRO=/opt/devkitpro")
-endif
-ifeq ($(strip $(DEVKITPPC)),)
-$(error "Please set DEVKITPPC in your environment, e.g. export DEVKITPPC=$(DEVKITPRO)/devkitPPC")
-endif
-
-# powerpc-eabi-gcc (Rust's linker driver) and elf2dol come from devkitPro.
-export PATH := $(DEVKITPPC)/bin:$(DEVKITPRO)/tools/bin:$(PATH)
 
 TARGET_SPEC  := powerpc-gekko-none-eabi.json
 TARGET_TRIPLE := powerpc-gekko-none-eabi
 PROFILE      := release
-
-# Link wiring for every GameCube binary, applied only to the GC target via
-# CARGO_TARGET_*_RUSTFLAGS (host tools such as build scripts are unaffected):
-#  - -mogc is already handled by the target spec (linker script, crt0)
-#  - libogc/libsysbase/newlib/libgcc close the symbol references
-export CARGO_TARGET_POWERPC_GEKKO_NONE_EABI_RUSTFLAGS := \
-	-L$(DEVKITPRO)/libogc/lib/cube \
-	-Clink-arg=-Wl,--start-group \
-	-Clink-arg=-logc \
-	-Clink-arg=-lsysbase \
-	-Clink-arg=-lc \
-	-Clink-arg=-lm \
-	-Clink-arg=-lgcc \
-	-Clink-arg=-Wl,--end-group
 
 EXAMPLES := \
 	hello-console \
@@ -54,9 +25,11 @@ EXAMPLES := \
 
 DOLS := $(addprefix dist/,$(addsuffix .dol,$(EXAMPLES)))
 
+HOST_TARGET := $(shell rustc -vV | sed -n 's/host: //p')
+
 .PHONY: all list clean run $(EXAMPLES)
 
-all: $(DOLS)
+all: tools/dol/gc-dol $(DOLS)
 	@echo built: $(DOLS)
 
 list:
@@ -65,16 +38,29 @@ list:
 $(EXAMPLES): %: dist/%.dol
 	@echo built: $<
 
-dist/%.dol: FORCE
-	@mkdir -p dist
-	cargo build --release --target $(TARGET_SPEC) -p $*
-	elf2dol target/$(TARGET_TRIPLE)/$(PROFILE)/$* $@
+tools/dol/gc-dol: tools/gc-dol/main.rs tools/gc-dol/Cargo.toml
+	cd tools/gc-dol && cargo build --release --target x86_64-unknown-linux-gnu
+	mkdir -p tools/dol
+	cp -f tools/gc-dol/target-host/x86_64-unknown-linux-gnu/release/gc-dol tools/dol/gc-dol
+	touch $@
 
-FORCE:
+# Link with our memory script. RUSTFLAGS applies to all crates in this
+# workspace (gc-only target).
+RUSTFLAGS := -C link-arg=-T -C link-arg=$(abspath memory.x.ld)
+
+CARGO_BUILD := RUSTFLAGS='$(RUSTFLAGS)' cargo build --release --target $(TARGET_SPEC)
+
+dist/%.elf: memory.x.ld $(TARGET_SPEC) $(shell find crates/gc-std examples -name '*.rs' -o -name Cargo.toml)
+	@mkdir -p dist
+	$(CARGO_BUILD) -p $*
+	cp -f target/$(TARGET_TRIPLE)/$(PROFILE)/$* $@
+
+dist/%.dol: dist/%.elf tools/dol/gc-dol
+	tools/dol/gc-dol $< $@
 
 clean:
 	cargo clean
-	rm -rf dist
+	rm -rf dist tools/dol/gc-dol
 
 run: dist/$(EXAMPLE).dol
 	dolphin-emu --batch --exec=$<

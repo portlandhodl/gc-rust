@@ -2,7 +2,7 @@
 name = "pixel-plasma"
 version = "0.1.0"
 edition = "2021"
-description = "gc-rust example: software-rendered plasma straight into the framebuffer"
+description = "gc-rust example: 05-pixel-plasma"
 
 [dependencies]
 gc-std = { path = "../../crates/gc-std" }

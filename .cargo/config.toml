@@ -1,8 +1,9 @@
 # Build configuration for Nintendo GameCube (Gekko / PowerPC 750CXe).
 #
-# `core` and `alloc` are built from source with `-Z build-std` because there is
-# no prebuilt std for this target. Linking is done by devkitPPC's gcc
-# (`-mogc` pulls in the libogc startfiles, linker script and libs).
+# `core` and `alloc` are built from source with `-Z build-std` because this
+# custom target ships no prebuilt std. Linking is done by rust-lld
+# (`linker = "rust-lld"` in the target spec) with our `memory.x.ld` layout
+# script. No external toolchain is needed.
 
 [build]
 target = "powerpc-gekko-none-eabi.json"

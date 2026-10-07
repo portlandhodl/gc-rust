@@ -46,7 +46,7 @@ const FACES: [Face; 6] = [
 ];
 
 /// Rotate a direction by the 3x3 part of the model matrix.
-fn rotate_normal(m: &gc_std::ffi::Mtx, n: [f32; 3]) -> [f32; 3] {
+fn rotate_normal(m: &gc_std::gctypes::Mtx, n: [f32; 3]) -> [f32; 3] {
     [
         m[0][0] * n[0] + m[0][1] * n[1] + m[0][2] * n[2],
         m[1][0] * n[0] + m[1][1] * n[1] + m[1][2] * n[2],
@@ -69,7 +69,7 @@ fn shade(normal_world: [f32; 3], base: [u8; 3], light_dir: [f32; 3]) -> (u8, u8,
 extern "C" fn main() -> i32 {
     let gc = gc_std::init();
     let gx = gc.into_gx();
-    gx.set_clear_color(gc_std::ffi::GXColor::rgb(8, 8, 14));
+    gx.set_clear_color(gc_std::GXColor::rgb(8, 8, 14));
 
     let proj = gu::perspective(60.0, 1.33, 1.0, 100.0);
     gx.load_perspective(&proj);

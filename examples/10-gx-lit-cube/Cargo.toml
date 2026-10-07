@@ -2,7 +2,7 @@
 name = "gx-lit-cube"
 version = "0.1.0"
 edition = "2021"
-description = "gc-rust example: spinning cube with per-vertex lighting (normals + dot-lighting on CPU)"
+description = "gc-rust example: 10-gx-lit-cube"
 
 [dependencies]
 gc-std = { path = "../../crates/gc-std" }

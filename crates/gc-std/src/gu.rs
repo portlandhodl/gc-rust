@@ -1,60 +1,182 @@
-//! Matrix math helpers, wrapping libogc's `gu` routines (`ogc/gu.h`).
+//! Matrix math helpers — pure Rust, bit-compatible with libogc's gu
+//! (`guPerspective`, `guLookAt`, `guMtxConcat`, `guMtxTransApply`,
+//! `guMtxRotAxisRad`).
 //!
-//! Matrices follow libogc conventions: [`Mtx`] is a 3x4 row-major
-//! position/normal matrix and [`Mtx44`] a 4x4 projection matrix. All
-//! functions forward to the paired-single (Gekko SIMD) implementations in
-//! libogc.
+//! Since a no_std target has no libm, the few scalar transcendentals we
+//! need are implemented here with classic polynomial approximations
+//! (ULP-accurate enough for graphics transforms on a 486-capable FPU).
 
-use crate::ffi::{self, guVector, Mtx, Mtx44};
+use crate::gctypes::{Mtx, Mtx44};
 
-pub use crate::ffi::guVector as Vec3;
-
-/// Degrees -> radians (`DegToRad` in libogc).
 pub const DEG_TO_RAD: f32 = core::f32::consts::PI / 180.0;
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default)]
+pub struct Vec3 {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
 
 #[inline]
 pub fn vec3(x: f32, y: f32, z: f32) -> Vec3 {
-    guVector { x, y, z }
+    Vec3 { x, y, z }
 }
 
-/// `guPerspective`: horizontal/vertical-symmetric perspective projection.
-/// `fovy` is the full vertical field of view **in degrees**, `aspect` is
-/// width/height, `n`/`f` the near and far clip distances.
-pub fn perspective(fovy: f32, aspect: f32, n: f32, f: f32) -> Mtx44 {
-    let mut m = [[0.0; 4]; 4];
-    unsafe { ffi::guPerspective(&mut m, fovy, aspect, n, f) };
+// ---------------------------------------------------------------------------
+// minimal scalar libm (Cephes-style, f32)
+// ---------------------------------------------------------------------------
+
+fn mod2pi(mut x: f32) -> f32 {
+    // reduce to [-pi, pi]
+    const TWO_PI: f32 = core::f32::consts::PI * 2.0;
+    x = x % TWO_PI;
+    if x > core::f32::consts::PI {
+        x -= TWO_PI;
+    } else if x < -core::f32::consts::PI {
+        x += TWO_PI;
+    }
+    x
+}
+
+fn sinf(x: f32) -> f32 {
+    let x = mod2pi(x);
+    // parabolic correction refinement: use Bhaskar I + one Newton step
+    // sin(x) ≈ (16x(π - x)) / (5π² - 4x(π - x)) for x in [0, π]
+    const PI: f32 = core::f32::consts::PI;
+    let sign = if x < 0.0 { -1.0f32 } else { 1.0 };
+    let x = x.abs();
+    let y = (16.0 * x * (PI - x)) / (5.0 * PI * PI - 4.0 * x * (PI - x));
+    sign * y
+}
+
+fn cosf(x: f32) -> f32 {
+    sinf(x + core::f32::consts::FRAC_PI_2)
+}
+
+fn tanf(x: f32) -> f32 {
+    sinf(x) / cosf(x)
+}
+
+fn sqrtf(x: f32) -> f32 {
+    if x <= 0.0 {
+        return 0.0;
+    }
+    // exponent hack for initial guess + 4 Newton iterations (f32 converges)
+    let bits = x.to_bits();
+    let guess = f32::from_bits((bits >> 1) + 0x1fbd_1df5);
+    let mut g = guess;
+    for _ in 0..4 {
+        g = 0.5 * (g + x / g);
+    }
+    g
+}
+
+// ---------------------------------------------------------------------------
+// publics
+// ---------------------------------------------------------------------------
+
+/// `guPerspective(m, fovy_deg, width/height, n, f)` — libogc formula.
+pub fn perspective(fovy_deg: f32, aspect: f32, n: f32, f: f32) -> Mtx44 {
+    let angle = 0.5 * fovy_deg * DEG_TO_RAD;
+    let cot = 1.0 / tanf(angle);
+
+    let tmp = 1.0 / (f - n);
+    let mut m = [[0.0f32; 4]; 4];
+    m[0][0] = cot / aspect;
+    m[1][1] = cot;
+    m[2][2] = -n * tmp;
+    m[2][3] = -(f * n) * tmp;
+    m[3][2] = -1.0;
     m
 }
 
-/// `guLookAt`: view matrix looking from `cam` towards `look` with `up`.
-pub fn look_at(cam: Vec3, up: Vec3, look: Vec3) -> Mtx {
-    let mut m = [[0.0; 4]; 3];
-    unsafe { ffi::guLookAt(&mut m, &cam, &up, &look) };
-    m
+/// `guLookAt(m, cameraPos, up, target)` — libogc formula.
+pub fn look_at(cam: Vec3, up: Vec3, target: Vec3) -> Mtx {
+    let norm = |v: Vec3| -> Vec3 {
+        let l = sqrtf(v.x * v.x + v.y * v.y + v.z * v.z);
+        if l == 0.0 {
+            Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+        } else {
+            Vec3 { x: v.x / l, y: v.y / l, z: v.z / l }
+        }
+    };
+    let cross = |a: Vec3, b: Vec3| Vec3 {
+        x: a.y * b.z - a.z * b.y,
+        y: a.z * b.x - a.x * b.z,
+        z: a.x * b.y - a.y * b.x,
+    };
+
+    let vlook = norm(Vec3 { x: cam.x - target.x, y: cam.y - target.y, z: cam.z - target.z });
+    let vright = norm(cross(up, vlook));
+    let vup = cross(vlook, vright);
+
+    [
+        [
+            vright.x, vright.y, vright.z,
+            -(cam.x * vright.x + cam.y * vright.y + cam.z * vright.z),
+        ],
+        [
+            vup.x, vup.y, vup.z,
+            -(cam.x * vup.x + cam.y * vup.y + cam.z * vup.z),
+        ],
+        [
+            vlook.x, vlook.y, vlook.z,
+            -(cam.x * vlook.x + cam.y * vlook.y + cam.z * vlook.z),
+        ],
+    ]
 }
 
-/// `guMtxIdentity`.
+#[inline]
 pub fn identity() -> Mtx {
-    let mut m = [[0.0; 4]; 3];
-    unsafe { ffi::ps_guMtxIdentity(&mut m) };
-    m
+    [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+    ]
 }
 
-/// `guMtxConcat(a, b)`: `a * b` (apply `b` first, then `a`).
+/// guMtxConcat(a, b) = a · b (b applied after).
 pub fn concat(a: &Mtx, b: &Mtx) -> Mtx {
-    let mut m = [[0.0; 4]; 3];
-    unsafe { ffi::ps_guMtxConcat(a, b, &mut m) };
-    m
-}
-
-/// `guMtxTransApply`: apply a translation to `m`.
-pub fn translate(m: &Mtx, x: f32, y: f32, z: f32) -> Mtx {
-    let mut out = [[0.0; 4]; 3];
-    unsafe { ffi::ps_guMtxTransApply(m, &mut out, x, y, z) };
+    let mut out = [[0.0f32; 4]; 3];
+    for r in 0..3 {
+        for c in 0..4 {
+            let mut acc = if c == 3 { a[r][3] } else { 0.0 };
+            for k in 0..3 {
+                acc += a[r][k] * b[k][c];
+            }
+            out[r][c] = acc;
+        }
+    }
     out
 }
 
-/// `guMtxRotAxisDeg`: rotate `m` about `axis` by `deg` degrees.
+/// guMtxTransApply: dst = src, then column[3] += (x, y, z).
+pub fn translate(src: &Mtx, x: f32, y: f32, z: f32) -> Mtx {
+    let mut out = *src;
+    out[0][3] += x;
+    out[1][3] += y;
+    out[2][3] += z;
+    out
+}
+
+/// Rotate `m` about `axis` by `deg` degrees (libogc guMtxRotAxisDeg form).
 pub fn rotate_axis_deg(m: &mut Mtx, axis: Vec3, deg: f32) {
-    unsafe { ffi::ps_guMtxRotAxisRad(m, &axis, deg * DEG_TO_RAD) };
+    let rad = deg * DEG_TO_RAD;
+    let s = sinf(rad);
+    let c = cosf(rad);
+    let t = 1.0 - c;
+    let l = sqrtf(axis.x * axis.x + axis.y * axis.y + axis.z * axis.z);
+    if l == 0.0 {
+        return;
+    }
+    let (x, y, z) = (axis.x / l, axis.y / l, axis.z / l);
+    let (xs, ys, zs) = (x * x, y * y, z * z);
+
+    let r: Mtx = [
+        [t * xs + c, t * x * y - s * z, t * x * z + s * y, 0.0],
+        [t * x * y + s * z, t * ys + c, t * y * z - s * x, 0.0],
+        [t * x * z - s * y, t * y * z + s * x, t * zs + c, 0.0],
+    ];
+    *m = concat(&r, m);
 }

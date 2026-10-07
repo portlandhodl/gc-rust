@@ -2,7 +2,7 @@
 name = "hello-console"
 version = "0.1.0"
 edition = "2021"
-description = "gc-rust example: text console hello world"
+description = "gc-rust example: 01-hello-console"
 
 [dependencies]
 gc-std = { path = "../../crates/gc-std" }

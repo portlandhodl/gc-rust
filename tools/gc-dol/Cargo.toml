@@ -1,0 +1,13 @@
+[workspace]
+
+[package]
+name = "gc-dol"
+version = "0.1.0"
+edition = "2021"
+description = "ELF32 -> GameCube .dol converter (pure Rust, no devkitPro)"
+
+[dependencies]
+
+[[bin]]
+name = "gc-dol"
+path = "main.rs"

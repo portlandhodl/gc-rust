@@ -1,23 +1,21 @@
-//! Runtime glue required by `core`/`alloc`: the panic handler and the
-//! allocation-failure handler.
+//! Runtime glue for a bare-metal no-OS target.
 
 use core::alloc::Layout;
 use core::panic::PanicInfo;
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    crate::println!("\n===== PANIC =====");
-    crate::println!("{info}");
+    // try to get it on screen if the console is alive
+    crate::println!("\n===== PANIC =====\n{info}");
     loop {
-        core::hint::spin_loop();
+        unsafe { crate::hw::isync() };
     }
 }
 
 #[alloc_error_handler]
-fn alloc_error(layout: Layout) -> ! {
-    crate::println!("\n===== OUT OF MEMORY =====");
-    crate::println!("requested layout: {layout:?}");
+fn oom(layout: Layout) -> ! {
+    crate::println!("\n===== OUT OF MEMORY =====\nlayout: {layout:?}");
     loop {
-        core::hint::spin_loop();
+        unsafe { crate::hw::isync() };
     }
 }

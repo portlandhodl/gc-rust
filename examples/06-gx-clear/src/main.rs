@@ -28,7 +28,7 @@ extern "C" fn main() -> i32 {
         let r = ((phase >> 1) & 0xff) as u8;
         let g = (phase.wrapping_add(85) & 0xff) as u8;
         let b = (phase.wrapping_add(170) & 0xff) as u8;
-        gx.set_clear_color(gc_std::ffi::GXColor::rgba(r, g, b, 0xff));
+        gx.set_clear_color(gc_std::GXColor::rgba(r, g, b, 0xff));
 
         gx.begin_frame();
         gx.draw_done();

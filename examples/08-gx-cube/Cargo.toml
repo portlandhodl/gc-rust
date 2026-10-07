@@ -2,7 +2,7 @@
 name = "gx-cube"
 version = "0.1.0"
 edition = "2021"
-description = "gc-rust example: rotating 3D cube with per-face colors (depth-tested)"
+description = "gc-rust example: 08-gx-cube"
 
 [dependencies]
 gc-std = { path = "../../crates/gc-std" }
