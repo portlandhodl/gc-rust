@@ -155,7 +155,7 @@ fn slot_ptr(idx: u8) -> *mut core::ffi::c_void {
     extern "C" {
         static __xfb_base: u32;
     }
-    let base = unsafe { &raw const __xfb_base } as usize;
+    let base = &raw const __xfb_base as usize;
     hw::cached_to_uncached((base + idx as usize * XFB_SLOT_BYTES) as *mut core::ffi::c_void)
 }
 

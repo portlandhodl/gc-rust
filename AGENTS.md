@@ -26,6 +26,15 @@ via the in-tree `tools/gc-dol` host tool.
   - `gx.rs` — GX driver: pipe reg writers, immediate mode, TEV, dirty-state
     flush (port of libogc `gx.c`).
   - `gu.rs` — matrix math (pure Rust; Cephes-style sin/cos/sqrt inside).
+  - `exi.rs` — EXI bus: lock/select/immediate/DMA (sync port of libogc
+    exi.c), device-id read, insert probe. Used by card.rs/sram.rs/usbgecko.rs.
+  - `sram.rs` — system SRAM (settings blob) read/write with checksums.
+  - `card.rs` — memory-card driver (CARD_* port; card image workarea in
+    MEM1, dual dir/FAT copies, next-fit allocation, erase-before-write).
+    Wire layer is a `CardBus` trait; `gc-host-tests` emulates a card and
+    runs the real state machine against it.
+  - `usbgecko.rs` — USB Gecko debug channel (host-visible over TCP 55020
+    under Dolphin's Gecko emulation).
   - `audio.rs` — simple AI DMA PCM streaming (48 kHz stereo 16-bit,
     int-refill).
   - `aesnd.rs` — polyphonic DSP-mixer audio (port of libaesnd's host
@@ -48,7 +57,10 @@ via the in-tree `tools/gc-dol` host tool.
 - `make` — builds tool + all `dist/*.dol`.
 - `make <pkg>` — one example (names: hello-console, pad-input, heap-strings,
   video-info, pixel-plasma, gx-clear, gx-triangle, gx-cube, gx-textured-cube,
-  gx-lit-cube, irq-timer, pad-calibrated, audio-beep, dsp-mixer).
+  gx-lit-cube, irq-timer, pad-calibrated, audio-beep, dsp-mixer, exi-sram,
+  memcard, usb-gecko).
+- `tests/memcard-persist.sh` / `tests/usbgecko-e2e.sh` — manual E2E tests
+  (need desktop Dolphin; not wired into `make check`).
 - `make run EXAMPLE=<pkg>` — Dolphin.
 
 ## Conventions
@@ -68,8 +80,9 @@ via the in-tree `tools/gc-dol` host tool.
   1. `tools/gc-dol`: packer unit tests + validation of every `dist/*.dol`
      header (all addresses inside MEM1, entry = 0x80003100).
   2. `tools/gc-host-tests`: pure-Rust math (perspective/look-at/concat/
-     rotations) vs reference constants, plus heap allocator
-     correctness/fragmentation suites, tested on host.
+     rotations) vs reference constants, heap allocator
+     correctness/fragmentation suites, and a memory-card emulation suite
+     driving the real card.rs state machine, tested on host.
   3. `tests/dolphin-smoke.sh`: boots each `dist/*.dol` in headless Dolphin
      (flatpak) for 6s; panic/DSI/ISI/illegal-instruction = fail.
 - Run manually: `sh tests/dolphin-smoke.sh [names...]`,

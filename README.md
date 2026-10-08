@@ -27,6 +27,8 @@ Nothing else. No devkitPro, no gcc, no libogc, no elf2dol.
 * **Polyphonic audio** (`aesnd`): up to 32 voices mixed on the console's DSP by the libaesnd-compatible mixer microcode (`dspcode.rs`), staged through ARAM, with per-voice volume/pitch/loop and stream-refill callbacks.
 * **Audio** (simple path): stereo 16-bit PCM @ 48 kHz straight through the AI DMA engine (interrupt-driven buffer refill, `audio::on_refill` callback) — for when you just need a beep.
 * Controller (SI) driver: buttons, held state, analog sticks, analog triggers, origin calibration (cmd `0x41`), hot-plug detect.
+* **Memory cards** (`card`): the `CARD_*` save-game filesystem (mount/verify/create/read/write/delete/dir-walk), ported 1:1 from libogc, exercised host-side against a card-image emulator.
+* **EXI bus** (`exi`) with libogc-shaped sync API, plus USB Gecko debug output and system SRAM settings access (`sram`).
 * `gu` matrix math (perspective, look-at, concat, rotation…) in pure Rust.
 * Font-based text console on the framebuffer (`print!`/`println!`).
 * **Framebuffer double-buffering** — a two-slot VI flip chain (`video.flip()`; the GX `end_frame()` flips automatically).
@@ -78,6 +80,9 @@ On hardware: copy the `.dol` onto an SD card and load it with Swiss (or any othe
 | 12 | `pad-calibrated`    | Pad origin calibration + hot-plug detect                |
 | 13 | `audio-beep`        | Stereo PCM out via AI DMA at 48 kHz, interrupt-refilled |
 | 14 | `dsp-mixer`         | AESND polyphony: chord loop + accents mixed on the DSP |
+| 15 | `exi-sram`           | EXI bus driver + system SRAM/settings readout          |
+| 16 | `memcard`            | Save files on a real GC memory card (CARD driver, host-tested) |
+| 17 | `usb-gecko`          | USB Gecko debug-channel output (host over TCP under Dolphin) |
 
 Every resulting `.dol` contains Rust + hardware glue only. No C, no assembly libraries, zero non-Rust code.
 
