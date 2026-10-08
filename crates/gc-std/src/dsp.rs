@@ -25,21 +25,24 @@ pub mod csr {
 }
 
 // DSP proof codes — these are the DSP's ROM-driven handshakes.
-const MAIL_DSP_READY: u32 = 0x8071_FEED;
-const MAIL_TASK_INIT: u32 = 0x80F3_A001;
-const MAIL_TASK_IRAM_ADDR: u32 = 0x80F3_C002;
-const MAIL_TASK_IRAM_LEN: u32 = 0x80F3_A002;
-const MAIL_TASK_DRAM_LOAD: u32 = 0x80F3_B002;
-const MAIL_TASK_INIT_VEC: u32 = 0x80F3_D001;
-// runtime messages
-const MAIL_TASK_RUN: u32 = 0xDCD1_0000;
-const MAIL_TASK_YIELD: u32 = 0xDCD1_0001;
-const MAIL_TASK_DONE: u32 = 0xDCD1_0002;
-const MAIL_TASK_DONE2: u32 = 0xDCD1_0003;
-const MAIL_TASK_REQ: u32 = 0xDCD1_0004;
-const MAIL_ACK_DONE: u32 = 0xCDD1_0002;
-const MAIL_ACK_YIELD: u32 = 0xCDD1_0001;
-const MAIL_ACK_KILL: u32 = 0xCDD1_0003;
+pub(crate) const MAIL_DSP_READY: u32 = 0x8071_FEED;
+pub(crate) const MAIL_TASK_INIT: u32 = 0x80F3_A001;
+pub(crate) const MAIL_TASK_IRAM_ADDR: u32 = 0x80F3_C002;
+pub(crate) const MAIL_TASK_IRAM_LEN: u32 = 0x80F3_A002;
+pub(crate) const MAIL_TASK_DRAM_LOAD: u32 = 0x80F3_B002;
+pub(crate) const MAIL_TASK_INIT_VEC: u32 = 0x80F3_D001;
+// runtime messages (microcode -> host)
+pub(crate) const MAIL_TASK_RUN: u32 = 0xDCD1_0000;
+#[allow(dead_code)]
+pub(crate) const MAIL_TASK_YIELD: u32 = 0xDCD1_0001;
+pub(crate) const MAIL_TASK_DONE: u32 = 0xDCD1_0002;
+pub(crate) const MAIL_TASK_DONE2: u32 = 0xDCD1_0003;
+pub(crate) const MAIL_TASK_REQ: u32 = 0xDCD1_0004;
+// runtime acks (host -> microcode)
+pub(crate) const MAIL_ACK_DONE: u32 = 0xCDD1_0002;
+#[allow(dead_code)]
+pub(crate) const MAIL_ACK_YIELD: u32 = 0xCDD1_0001;
+pub(crate) const MAIL_ACK_KILL: u32 = 0xCDD1_0003;
 
 const DSP_REG_BASE: u32 = 0xCC00_5000;
 
@@ -53,11 +56,26 @@ unsafe fn dsp_write(idx: u32, v: u16) {
     hw::write16(DSP_REG_BASE + idx * 2, v);
 }
 
-/// Reset the DSP into a clean state (mirrors `DSP_Reset`).
+/// Reset the DSP into a clean state (mirrors libogc's `DSP_Init`
+/// register sequence: pulse DSPRESET, drop it again, RES stays clear).
 pub fn reset() {
     unsafe {
         let old = dsp_read(5);
-        dsp_write(5, (old & !(csr::AIINT | csr::ARINT | csr::DSPINT)) | csr::DSPRESET | csr::RES);
+        dsp_write(5, (old & !(csr::AIINT | csr::ARINT | csr::DSPINT)) | csr::DSPRESET);
+        dsp_write(
+            5,
+            old & !(csr::HALT | csr::AIINT | csr::ARINT | csr::DSPINT | csr::DSPRESET),
+        );
+    }
+}
+
+/// Acknowledge the DSP's mailbox interrupt (`DSPCR_DSPINT` is W1C).
+/// Called from the DSP PI interrupt handler, mirroring libogc's
+/// `__dsp_inthandler` ack.
+pub fn ack_interrupt() {
+    unsafe {
+        let old = dsp_read(5);
+        dsp_write(5, (old & !(csr::AIINT | csr::ARINT)) | csr::DSPINT);
     }
 }
 
@@ -139,15 +157,15 @@ pub fn boot_microcode(
     let ready = read_mail_from();
     if ready != MAIL_DSP_READY { return Err(()); }
 
-    send_mail_to(0x80F3_A001); spin_wait_free();
+    send_mail_to(MAIL_TASK_INIT); spin_wait_free();
     send_mail_to(iram_image_phys); spin_wait_free();
-    send_mail_to(0x80F3_C002); spin_wait_free();
+    send_mail_to(MAIL_TASK_IRAM_ADDR); spin_wait_free();
     send_mail_to(iram_addr as u32); spin_wait_free();
-    send_mail_to(0x80F3_A002); spin_wait_free();
+    send_mail_to(MAIL_TASK_IRAM_LEN); spin_wait_free();
     send_mail_to(iram_len as u32); spin_wait_free();
-    send_mail_to(0x80F3_B002); spin_wait_free();
+    send_mail_to(MAIL_TASK_DRAM_LOAD); spin_wait_free();
     send_mail_to(0); spin_wait_free();
-    send_mail_to(0x80F3_D001); spin_wait_free();
+    send_mail_to(MAIL_TASK_INIT_VEC); spin_wait_free();
     send_mail_to(init_vec as u32); spin_wait_free();
 
     Ok(())

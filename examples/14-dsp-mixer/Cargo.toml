@@ -1,0 +1,8 @@
+[package]
+name = "dsp-mixer"
+version = "0.1.0"
+edition = "2021"
+description = "gc-rust example: polyphonic audio through the DSP mixer (AESND port)"
+
+[dependencies]
+gc-std = { path = "../../crates/gc-std" }

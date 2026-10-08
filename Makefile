@@ -24,7 +24,8 @@ EXAMPLES := \
 	gx-lit-cube \
 	irq-timer \
 	pad-calibrated \
-	audio-beep
+	audio-beep \
+	dsp-mixer
 
 DOLS := $(addprefix dist/,$(addsuffix .dol,$(EXAMPLES)))
 
