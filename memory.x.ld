@@ -57,7 +57,12 @@ SECTIONS
 
     . = ALIGN(32);
     __Arena1Lo = .;
-    __Arena1Hi = 0x817FEFF0;
+    /* the XFB framebuffer is statically reserved at __xfb_base (see
+       crates/gc-std/src/video.rs) so the heap ends below it and the test
+       harness knows where rendered frames live on a real console / in
+       Dolphin. */
+    __Arena1Hi = 0x81734000;
+    __xfb_base = 0x81734000;
     __stack = 0x817FEFF0;
 
     /DISCARD/ : {

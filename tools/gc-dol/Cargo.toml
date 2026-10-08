@@ -6,8 +6,10 @@ version = "0.1.0"
 edition = "2021"
 description = "ELF32 -> GameCube .dol converter (pure Rust, no devkitPro)"
 
-[dependencies]
+[lib]
+name = "gc_dol"
+path = "src/lib.rs"
 
 [[bin]]
 name = "gc-dol"
-path = "main.rs"
+path = "src/main.rs"

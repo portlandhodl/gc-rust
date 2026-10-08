@@ -2,6 +2,10 @@
 /dist
 *.elf
 *.dol
+tools/gc-dol/target-host/
+tools/gc-host-tests/target-host/
+tools/dol/gc-dol
 *.o
 *.d
-.map
+*.map
+

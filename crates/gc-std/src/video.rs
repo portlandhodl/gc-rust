@@ -196,9 +196,16 @@ pub(crate) fn init() -> Video {
         let tvmode = hw::shiftr(u32::from(dcr), 8, 2);
 
         let mode = int_df_mode(tvmode);
+        // The XFB lives at a *fixed* cached address from the linker script;
+        // the heap ends just below it. This keeps the framebuffer at a
+        // known location for tests and Dual-homing GX copies.
+        extern "C" {
+            static __xfb_base: u32;
+        }
+        let fb_cached = &raw const __xfb_base as *mut u8;
         let size = usize::from(mode.fbWidth) * usize::from(mode.xfbHeight) * 2;
-        let fb = crate::heap::alloc_raw(size, 32) as *mut core::ffi::c_void;
-        let fb = hw::cached_to_uncached(fb);
+        let fb = hw::cached_to_uncached(fb_cached as *mut core::ffi::c_void);
+        core::ptr::write_bytes(fb, 0x10, size); // black (uncached view)
 
         configure(&mode, fb);
         hw::dc_flush_range(fb, size);

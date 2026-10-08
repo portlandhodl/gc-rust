@@ -32,12 +32,22 @@ Nothing else. No devkitPro, no gcc, no libogc, no elf2dol.
 
 ```bash
 rustup toolchain install nightly --component rust-src
-make                       # all examples -> dist/*.dol
+make                       # all examples -> dist/*.dol (header-validated)
 make list                  # print example names
 make gx-cube               # just one
 ```
 
-Then in Dolphin:
+## Test
+
+```bash
+make check    # packer unit tests (incl. synthetic ELF + every dist/*.dol),
+              # host-side math tests (mtx/perspective/rotations), and a
+              # headless Dolphin smoke boot of every dist/*.dol.
+```
+
+The Dolphin smoke test needs `flatpak install flathub org.DolphinEmu.dolphin-emu`. It is skipped with code 77 when absent.
+
+Then in Dolphin (GUI for actual pixels):
 
 ```bash
 make run EXAMPLE=gx-cube   # or: dolphin-emu --batch --exec=dist/gx-cube.dol

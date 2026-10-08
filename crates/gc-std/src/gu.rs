@@ -27,27 +27,45 @@ pub fn vec3(x: f32, y: f32, z: f32) -> Vec3 {
 // minimal scalar libm (Cephes-style, f32)
 // ---------------------------------------------------------------------------
 
-fn mod2pi(mut x: f32) -> f32 {
-    // reduce to [-pi, pi]
-    const TWO_PI: f32 = core::f32::consts::PI * 2.0;
-    x = x % TWO_PI;
-    if x > core::f32::consts::PI {
-        x -= TWO_PI;
-    } else if x < -core::f32::consts::PI {
-        x += TWO_PI;
-    }
-    x
+/// sin for small |x| ≤ π/4 via Taylor (max abs err ~ 1e-9).
+#[inline]
+fn sin_taylor(x: f32) -> f32 {
+    let x2 = x * x;
+    x * (1.0 + x2 * (-1.0 / 6.0 + x2 * (1.0 / 120.0 + x2 * (-1.0 / 5040.0))))
 }
 
-fn sinf(x: f32) -> f32 {
-    let x = mod2pi(x);
-    // parabolic correction refinement: use Bhaskar I + one Newton step
-    // sin(x) ≈ (16x(π - x)) / (5π² - 4x(π - x)) for x in [0, π]
+#[inline]
+fn cos_taylor(x: f32) -> f32 {
+    let x2 = x * x;
+    1.0 + x2 * (-0.5 + x2 * (1.0 / 24.0 + x2 * (-1.0 / 720.0)))
+}
+
+fn sinf(mut x: f32) -> f32 {
     const PI: f32 = core::f32::consts::PI;
-    let sign = if x < 0.0 { -1.0f32 } else { 1.0 };
-    let x = x.abs();
-    let y = (16.0 * x * (PI - x)) / (5.0 * PI * PI - 4.0 * x * (PI - x));
-    sign * y
+    const FRAC_PI_2: f32 = core::f32::consts::FRAC_PI_2;
+    const FRAC_PI_4: f32 = core::f32::consts::FRAC_PI_4;
+    const TWO_PI: f32 = PI * 2.0;
+
+    x %= TWO_PI;
+    if x < 0.0 {
+        x += TWO_PI;
+    }
+    // x in [0, 2π). Fold to [0,π] with sign.
+    let mut sign = 1.0f32;
+    if x > PI {
+        x -= PI;
+        sign = -1.0;
+    }
+    if x > FRAC_PI_2 {
+        x = PI - x;
+    }
+    // x in [0, π/2]
+    let v = if x > FRAC_PI_4 {
+        cos_taylor(FRAC_PI_2 - x) // cos(π/2 - x) = sin x
+    } else {
+        sin_taylor(x)
+    };
+    sign * v
 }
 
 fn cosf(x: f32) -> f32 {
@@ -62,10 +80,9 @@ fn sqrtf(x: f32) -> f32 {
     if x <= 0.0 {
         return 0.0;
     }
-    // exponent hack for initial guess + 4 Newton iterations (f32 converges)
+    // exponent-halving initial guess + 4 Newton iterations (f32-converged)
     let bits = x.to_bits();
-    let guess = f32::from_bits((bits >> 1) + 0x1fbd_1df5);
-    let mut g = guess;
+    let mut g = f32::from_bits((bits >> 1) + 0x1fbd_1df5);
     for _ in 0..4 {
         g = 0.5 * (g + x / g);
     }

@@ -49,7 +49,12 @@ via the in-tree `tools/gc-dol` host tool.
 
 ## Testing
 
-- `make all` — compile everything; then mutually-validate the DOL header
-  fields (all addresses inside MEM1).
-- No automated tests run on-target (no headless emulator harness yet);
-  check output in Dolphin when changing drivers.
+- `make check` — full suite:
+  1. `tools/gc-dol`: packer unit tests + validation of every `dist/*.dol`
+     header (all addresses inside MEM1, entry = 0x80003100).
+  2. `tools/gc-host-tests`: pure-Rust math (perspective/look-at/concat/
+     rotations) vs reference constants, tested on host.
+  3. `tests/dolphin-smoke.sh`: boots each `dist/*.dol` in headless Dolphin
+     (flatpak) for 6s; panic/DSI/ISI/illegal-instruction = fail.
+- Run manually: `sh tests/dolphin-smoke.sh [names...]`,
+  `RUN_SECS=<n>` overrides the 6s default.

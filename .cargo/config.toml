@@ -1,13 +1,11 @@
 # Build configuration for Nintendo GameCube (Gekko / PowerPC 750CXe).
 #
-# `core` and `alloc` are built from source with `-Z build-std` because this
-# custom target ships no prebuilt std. Linking is done by rust-lld
-# (`linker = "rust-lld"` in the target spec) with our `memory.x.ld` layout
-# script. No external toolchain is needed.
-
+# - The default *target* is the GameCube spec; host tools (tools/gc-dol)
+#   override this with their own `.cargo/config.toml`.
+# - `core`/`alloc` are rebuilt from source via `-Zbuild-std`, passed by the
+#   Makefile through RUSTFLAGS so it only applies to GameCube targets.
 [build]
 target = "powerpc-gekko-none-eabi.json"
 
 [unstable]
-build-std = ["core", "alloc"]
 json-target-spec = true

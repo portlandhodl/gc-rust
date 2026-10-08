@@ -1,0 +1,10 @@
+[workspace]
+
+[package]
+name = "gc-host-tests"
+version = "0.1.0"
+edition = "2021"
+description = "Host-side unit tests for gc-std's pure-Rust submodules"
+
+[lib]
+path = "src/lib.rs"
