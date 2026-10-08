@@ -82,6 +82,16 @@ via the in-tree `tools/gc-dol` host tool.
   USE_MEMORYWATCHER compiled in; the headless flatpak here has it off).
 - `tests/memcard-persist.sh` / `tests/usbgecko-e2e.sh` — manual E2E tests
   (need desktop Dolphin; not wired into `make check`).
+- `make iso EXAMPLE=dvd-read` — build a bootable GCM (gc-iso + apploader).
+- `tests/dvd-iso-e2e.sh` — boots the ISO in Dolphin + watches the
+  observation mailbox via MemoryWatcher (needs a Dolphin build with
+  USE_MEMORYWATCHER compiled in; the headless flatpak here has it off).
+- `tests/dolphin-iso-smoke.sh` — ISO boot smoke (works with the nogui
+  source build; the flatpak can't boot plain .dol files but ISOs fine).
+- A working local source build of Dolphin (nogui) lives at
+  `~/git/dolphin/build-x86_64-release/Binaries/dolphin-emu-nogui` — build
+  it with:
+  `cmake -G Ninja -DENABLE_QT=OFF -DENABLE_NOGUI=ON -DENABLE_TESTS=OFF -DENABLE_VULKAN=OFF -DENABLE_LLVM=OFF`.
 - `make run EXAMPLE=<pkg>` — Dolphin.
 
 ## Conventions

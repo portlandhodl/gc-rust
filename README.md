@@ -55,7 +55,14 @@ make check    # packer unit tests (incl. synthetic ELF + every dist/*.dol),
               # headless Dolphin smoke boot of every dist/*.dol.
 ```
 
-The Dolphin smoke test needs `flatpak install flathub org.DolphinEmu.dolphin-emu`. It is skipped with code 77 when absent.
+The Dolphin smoke test needs `flatpak install flathub org.DolphinEmu.dolphin-emu`. It is skipped with code 77 when absent. For deeper testing (GDB stub, MemoryWatcher, frame dumps), build Dolphin from source — the flatpak headless build has those hooks compiled out:
+
+```bash
+cmake -G Ninja -B build-x86_64-release \
+  -DENABLE_QT=OFF -DENABLE_NOGUI=ON -DENABLE_TESTS=OFF \
+  -DENABLE_VULKAN=OFF -DENABLE_LLVM=OFF
+ninja -C build-x86_64-release dolphin-nogui
+```
 
 Then in Dolphin (GUI for actual pixels):
 

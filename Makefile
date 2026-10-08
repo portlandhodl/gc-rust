@@ -47,6 +47,7 @@ check: all
 	@cd tools/gc-dol && cargo test --release
 	@cd tools/gc-host-tests && cargo test --release
 	@sh tests/dolphin-smoke.sh
+	@sh tests/dolphin-iso-smoke.sh
 
 test: check
 

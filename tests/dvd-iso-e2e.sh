@@ -18,7 +18,7 @@ fi
 
 DATA_DIR="$HOME/.var/app/org.DolphinEmu.dolphin-emu/data/dolphin-emu"
 MW="$DATA_DIR/MemoryWatcher"
-SOCK="$MW/MemoryWatcher.sock"
+SOCK="$MW/MemoryWatcher"
 [ -f "$MW/Locations.txt" ] && { echo "FAIL: $MW/Locations.txt already exists (refusing to clobber)"; exit 1; }
 
 mkdir -p "$MW"
