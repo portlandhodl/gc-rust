@@ -51,17 +51,13 @@ pub struct Audio {
 
 static INITED: AtomicBool = AtomicBool::new(false);
 static RUN_BUF_B: AtomicBool = AtomicBool::new(false); // the buffer DMA is *playing*
+#[allow(improper_ctypes_definitions)]
 static mut REFILL_CB: Option<extern "C" fn(&mut [i16])> = None;
 
 #[inline(always)]
 unsafe fn buf_phys(b: bool) -> u32 {
     let p = if b { &raw const BUF_B } else { &raw const BUF_A };
     hw::virt_to_phys(p as *const u8)
-}
-
-#[inline(always)]
-unsafe fn armed_buf_p(b: bool) -> *const u8 {
-    buf_phys(b) as *const u8
 }
 
 #[inline(always)]
@@ -127,10 +123,10 @@ pub fn init() -> Audio {
         hw::write16(AI_CTR_SAMP, AI_SCRESET);
 
         // zero the buffers to silence
-        core::ptr::write_bytes(BUF_A.0.as_mut_ptr(), 0, AI_BUF_BYTES);
-        core::ptr::write_bytes(BUF_B.0.as_mut_ptr(), 0, AI_BUF_BYTES);
-        hw::dc_flush_range(BUF_A.0.as_ptr(), AI_BUF_BYTES);
-        hw::dc_flush_range(BUF_B.0.as_ptr(), AI_BUF_BYTES);
+        core::ptr::write_bytes((*(&raw mut BUF_A)).0.as_mut_ptr(), 0, AI_BUF_BYTES);
+        core::ptr::write_bytes((*(&raw mut BUF_B)).0.as_mut_ptr(), 0, AI_BUF_BYTES);
+        hw::dc_flush_range((*(&raw mut BUF_A)).0.as_ptr(), AI_BUF_BYTES);
+        hw::dc_flush_range((*(&raw mut BUF_B)).0.as_ptr(), AI_BUF_BYTES);
 
         // arm AI DMA on channel A, the ISR will ping-pong
         armed_buf(false);
@@ -142,6 +138,7 @@ pub fn init() -> Audio {
 const AI_CTR_SAMP: u32 = 0xCC00_6C08;
 
 /// Install the refill callback. Called from interrupt context every 2 ms.
+#[allow(improper_ctypes_definitions)]
 pub fn on_refill(_: &Audio, f: extern "C" fn(buf: &mut [i16])) {
     unsafe {
         REFILL_CB = Some(f);

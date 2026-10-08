@@ -26,13 +26,17 @@ pub struct Fat<'io> {
     // BPB decoded
     fat_type: FatType,
     sectors_per_cluster: u32,
+    #[allow(dead_code)]
     reserved_sectors: u32,
+    #[allow(dead_code)]
     num_fats: u32,
     root_entries: u32,      // 0 for FAT32
+    #[allow(dead_code)]
     sectors_per_fat: u32,
     first_data_lba: u32,    // lba of cluster 2
     first_fat_lba: u32,
     root_dir_lba: u32,      // FAT16: lba of root dir; FAT32: cluster of root
+    #[allow(dead_code)]
     part_lba: u32,
 }
 

@@ -31,6 +31,7 @@ unsafe fn w(i: u32, v: u16) {
 static ALLOC_PTR: AtomicU32 = AtomicU32::new(0x4000);
 
 /// ARAM init: set the refresh-bits register and confirm for our model.
+#[allow(dead_code)]
 pub(crate) fn init() {
     unsafe {
         // From libogc AR_Init: dspReg[13] low byte is the SDRAM refresh —

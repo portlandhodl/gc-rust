@@ -61,6 +61,7 @@ extern "C" fn main() -> i32 {
 }
 
 // The audio callback — runs on the AI DMA interrupt. Keep it quick.
+#[allow(improper_ctypes_definitions)]
 extern "C" fn refill(buf: &mut [i16]) {
     // phase in Q16.16 within the 256-entry LUT
     static PHASE: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);

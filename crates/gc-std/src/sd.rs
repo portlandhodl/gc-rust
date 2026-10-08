@@ -19,7 +19,7 @@ use alloc::vec::Vec;
 // SPI bus trait
 // ---------------------------------------------------------------------------
 
-pub(crate) trait SdSpi {
+pub trait SdSpi {
     /// Clock the bus `n` bytes with CS *high* (power-up/init dummy clocks;
     /// the SD spec wants ≥74).
     fn idle_clocks(&mut self, n: usize) -> Result<(), i32>;
@@ -191,8 +191,6 @@ fn send_cmd(spi: &mut dyn SdSpi, fast: bool, cmd: Cmd) -> Result<(), i32> {
     Ok(())
 }
 
-/// `__card_writecmd0`'s lead-in is folded into `init` (idle_clocks); inline
-/// CMD0 send is part of the init sequence.
 /// `__card_readresponse` — poll for !bit7 (≤64 clocks), then read len-1
 /// more bytes if the command wants a wider response (R7/OCR/etc).
 fn read_response_bytes(spi: &mut dyn SdSpi, len: usize) -> Result<Vec<u8>, i32> {
@@ -245,7 +243,9 @@ fn write_data_response(spi: &mut dyn SdSpi) -> Result<u8, i32> {
 // command indices
 const CMD0: u8 = 0;
 const CMD8: u8 = 8;
+#[allow(dead_code)]
 const CMD9: u8 = 9;
+#[allow(dead_code)]
 const CMD12: u8 = 12;
 const CMD16: u8 = 16;
 const CMD17: u8 = 17;
