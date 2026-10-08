@@ -35,6 +35,8 @@ via the in-tree `tools/gc-dol` host tool.
     runs the real state machine against it.
   - `usbgecko.rs` — USB Gecko debug channel (host-visible over TCP 55020
     under Dolphin's Gecko emulation).
+  - `adpcm.rs` — Nintendo DSP-ADPCM → s16 mono decode (canonical math; 8
+    predictor-pair coeff table from the asset header).
   - `sd.rs` — SD/SDHC block IO over SD Gecko (SPI mode, CMD0/8/16/17/24/41/
     55/58 per sdgecko_io.c; `SdSpi` trait; console path drives EXI).
   - `fat.rs` — read-only FAT16/FAT32 (MBR or superfloppy, 8.3 names,

@@ -30,6 +30,7 @@ Nothing else. No devkitPro, no gcc, no libogc, no elf2dol.
 * **Memory cards** (`card`): the `CARD_*` save-game filesystem (mount/verify/create/read/write/delete/dir-walk), ported 1:1 from libogc, exercised host-side against a card-image emulator.
 * **EXI bus** (`exi`) with libogc-shaped sync API, plus USB Gecko debug output and system SRAM settings access (`sram`).
 * **SD Gecko** (`sd`): SD/SDHC block reads & writes over SPI; **`fat`** gives a read-only FAT16/FAT32 layer (list dir, read files) for media-grade storage.
+* **ADPCM decode** (`adpcm`): GC DSP-ADPCM → PCM s16 for stock audio assets, usable with `aesnd` voices.
 * `gu` matrix math (perspective, look-at, concat, rotation…) in pure Rust.
 * Font-based text console on the framebuffer (`print!`/`println!`).
 * **Framebuffer double-buffering** — a two-slot VI flip chain (`video.flip()`; the GX `end_frame()` flips automatically).
