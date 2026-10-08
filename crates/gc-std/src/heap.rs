@@ -4,8 +4,10 @@
 //!  __bss_end .. heap .. MEM1_TOP(minus stack)
 //! ```
 //!
-//! Small, deterministic, first-fit + coalescing free list with 32-byte
-//! block alignment (cache line). The global allocator is registered in
+//! Small, deterministic, *best-fit* + address-ordered coalescing free list
+//! with 32-byte block alignment (cache line). Best-fit (tightest fitting
+//! block) is chosen over first-fit to limit splintering of large free runs
+//! in long-running sessions. The global allocator is registered in
 //! [`crate::crt0`].
 
 use core::alloc::{GlobalAlloc, Layout};
@@ -15,7 +17,10 @@ const ALIGN: usize = 32;
 /// Header size before each payload (size+magic).
 const HDR: usize = 32;
 const MAGIC: u32 = 0x4743_414C;
-const MIN_BLOCK: usize = 64;
+/// Smallest free-list fragment. One cache line: all block addresses and
+/// sizes are multiples of 32, so every split sliver can go straight back
+/// into the free list — no bytes are ever absorbed/lost between blocks.
+const MIN_BLOCK: usize = 32;
 
 struct FreeBlock {
     size: usize,
@@ -55,10 +60,18 @@ pub(crate) unsafe fn init(start: *mut u8, end: *mut u8) {
 }
 
 /// Allocate with explicit alignment (no header semantics).
+///
+/// Best-fit policy: scan the whole list and split the *tightest* fitting
+/// block; the list stays address-ordered so `free_block` can coalesce.
 pub(crate) unsafe fn alloc_raw(size: usize, align: usize) -> *mut u8 {
     let h = &mut *core::ptr::addr_of_mut!(HEAP);
     let align = align.max(ALIGN);
     let want = align_up(size, ALIGN);
+
+    let mut best: *mut FreeBlock = ptr::null_mut();
+    let mut best_prev: *mut FreeBlock = ptr::null_mut();
+    let mut best_pad = 0usize;
+    let mut best_leftover = usize::MAX;
 
     let mut prev: *mut FreeBlock = ptr::null_mut();
     let mut cur = h.head;
@@ -69,30 +82,53 @@ pub(crate) unsafe fn alloc_raw(size: usize, align: usize) -> *mut u8 {
         let avail = (*cur).size;
         if avail >= pad + want {
             let leftover = avail - pad - want;
-            let next = (*cur).next;
-            if leftover >= MIN_BLOCK {
-                let nb = (raw + pad + want) as *mut FreeBlock;
-                (*nb).size = leftover;
-                (*nb).next = next;
-                if prev.is_null() {
-                    h.head = nb;
-                } else {
-                    (*prev).next = nb;
+            if leftover < best_leftover {
+                best = cur;
+                best_prev = prev;
+                best_pad = pad;
+                best_leftover = leftover;
+                if leftover == 0 {
+                    break; // exact fit; can't do better
                 }
-            } else if prev.is_null() {
-                h.head = next;
-            } else {
-                (*prev).next = next;
             }
-            return aligned as *mut u8;
         }
         prev = cur;
         cur = (*cur).next;
     }
-    ptr::null_mut()
+    if best.is_null() {
+        return ptr::null_mut();
+    }
+
+    // Replace `best` with up to two free fragments: the alignment pad
+    // [best, payload) and the tail [payload_end, block_end). Both stay
+    // address-ordered in the list so free-time coalescing still works and
+    // the heap is byte-exact (freed arenas fully re-coalesce).
+    let raw = best as usize;
+    let old_next = (*best).next;
+    let tail_addr = raw + best_pad + want;
+
+    let mut link = old_next;
+    if best_leftover >= MIN_BLOCK {
+        let tail = tail_addr as *mut FreeBlock;
+        (*tail).size = best_leftover;
+        (*tail).next = old_next;
+        link = tail;
+    }
+    // best_pad is a multiple of ALIGN: < MIN_BLOCK means it is 0.
+    if best_pad >= MIN_BLOCK {
+        (*best).size = best_pad;
+        (*best).next = link;
+        link = best;
+    }
+    if best_prev.is_null() {
+        h.head = link;
+    } else {
+        (*best_prev).next = link;
+    }
+    (raw + best_pad) as *mut u8
 }
 
-unsafe fn free_block(addr: *mut u8, size: usize) {
+pub(crate) unsafe fn free_block(addr: *mut u8, size: usize) {
     let h = &mut *core::ptr::addr_of_mut!(HEAP);
     let b = addr as *mut FreeBlock;
     (*b).size = align_up(size, ALIGN);
@@ -124,7 +160,10 @@ unsafe fn free_block(addr: *mut u8, size: usize) {
 
 pub struct GcAllocator;
 
-#[global_allocator]
+// Only the target build registers the global allocator; host-side unit
+// tests (tools/gc-host-tests) include this file too and must not clash
+// with the host's allocator.
+#[cfg_attr(target_arch = "powerpc", global_allocator)]
 static ALLOCATOR: GcAllocator = GcAllocator;
 
 unsafe impl GlobalAlloc for GcAllocator {

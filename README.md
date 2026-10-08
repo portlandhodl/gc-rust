@@ -24,11 +24,13 @@ Nothing else. No devkitPro, no gcc, no libogc, no elf2dol.
 * **Interrupts & exceptions**: PI interrupt controller, exception vector trampolines, per-source handlers, `irq::IrqLock` critical sections.
 * Video (VI) driver: NTSC/PAL/MPAL/EURGB60, 480i IntDf and 480p progressive, YUY2 4:2:2 XFB, retrace polling.
 * **GX** driver: viewport/scissor, immediate-mode vertex streams through the write-gather pipe, projection/model matrix loads, TEV setup, depth buffer, EFB→XFB copy.
-* **Audio**: stereo 16-bit PCM @ 48 kHz through the AI DMA engine (interrupt-driven buffer refill, `audio::on_refill` callback).
+* **Polyphonic audio** (`aesnd`): up to 32 voices mixed on the console's DSP by the libaesnd-compatible mixer microcode (`dspcode.rs`), staged through ARAM, with per-voice volume/pitch/loop and stream-refill callbacks.
+* **Audio** (simple path): stereo 16-bit PCM @ 48 kHz straight through the AI DMA engine (interrupt-driven buffer refill, `audio::on_refill` callback) — for when you just need a beep.
 * Controller (SI) driver: buttons, held state, analog sticks, analog triggers, origin calibration (cmd `0x41`), hot-plug detect.
 * `gu` matrix math (perspective, look-at, concat, rotation…) in pure Rust.
 * Font-based text console on the framebuffer (`print!`/`println!`).
-* A free-list heap allocator on MEM1.
+* **Framebuffer double-buffering** — a two-slot VI flip chain (`video.flip()`; the GX `end_frame()` flips automatically).
+* A best-fit, byte-exact free-list heap allocator on MEM1.
 * ARAM streaming-block driver (sync DMA) if you want to study DMA into the DSP.
 
 ## Build
@@ -75,6 +77,7 @@ On hardware: copy the `.dol` onto an SD card and load it with Swiss (or any othe
 | 11 | `irq-timer`         | VI retrace via PI interrupt handler (no polling)        |
 | 12 | `pad-calibrated`    | Pad origin calibration + hot-plug detect                |
 | 13 | `audio-beep`        | Stereo PCM out via AI DMA at 48 kHz, interrupt-refilled |
+| 14 | `dsp-mixer`         | AESND polyphony: chord loop + accents mixed on the DSP |
 
 Every resulting `.dol` contains Rust + hardware glue only. No C, no assembly libraries, zero non-Rust code.
 
@@ -105,7 +108,8 @@ Your crate's name must match its directory name base (`examples/NN-mycoolgame` �
 | `powerpc-gekko-none-eabi.json` | custom rustc target: big-endian, +FPU (`750`), static reloc model, panic=abort, `rust-lld` linker driver |
 | `crates/gc-std/src/crt0.rs` | `_start`: real-mode BAT/HID0/L2/FPSCR setup then MMU back on; clear `.bss`; call `main()` |
 | `crates/gc-std/src/hw.rs` | MMIO read/write + write-gather pipe helpers, YAGCD register addresses |
-| `crates/gc-std/src/video.rs` | VI driver: timing tables (NTSC/PAL/MPAL/EURGB60 + 480p), framebuffer setup, vsync |
+| `crates/gc-std/src/video.rs` | VI driver: timing tables (NTSC/PAL/MPAL/EURGB60 + 480p), framebuffer setup, vsync, flip chain |
+| `crates/gc-std/src/aesnd.rs` | DSP-mixer voices: PB structs, `0xface*` mail protocol, AI DMA pacing (libaesnd port) |
 | `crates/gc-std/src/irq.rs` | PI interrupt controller, exception trampolines, per-source handlers |
 | `crates/gc-std/src/input.rs` | SI `0x4003` polling with origin calibration + hot-plug detect |
 | `crates/gc-std/src/gx.rs` | GX register shadowing + BP/CP/XF command writers + pipeline helpers |

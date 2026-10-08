@@ -12,6 +12,13 @@ pub mod gctypes;
 #[allow(dead_code)]
 pub mod gu;
 
+// heap.rs is pure pointer arithmetic on a caller-provided arena — testable
+// on the host as-is. The `#[global_allocator]` registration is gated on
+// target_arch = "powerpc" inside heap.rs, so including it here is safe.
+#[path = "../../../crates/gc-std/src/heap.rs"]
+#[allow(dead_code)]
+pub mod heap;
+
 #[cfg(test)]
 mod tests {
     use super::gctypes::{Mtx, Mtx44};
@@ -132,5 +139,143 @@ mod tests {
         assert_close(m[1][1], -1.0, "cos180 m11");
         assert_close(m[2][2], -1.0, "cos180 m22");
         assert_close(m[0][0], 1.0, "axis row m00");
+    }
+}
+
+#[cfg(test)]
+mod heap_tests {
+    use crate::heap;
+    use core::alloc::{GlobalAlloc, Layout};
+    use std::vec::Vec;
+
+    const ARENA: usize = 1024 * 1024;
+
+    #[repr(align(32))]
+    struct Arena([u8; ARENA]);
+
+    // The allocator under test holds its free list in one global static —
+    // serialize the heap tests (the default test runner is multithreaded).
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct TestHeap {
+        _arena: Box<Arena>,
+        _guard: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl TestHeap {
+        fn new() -> TestHeap {
+            let guard = LOCK.lock().unwrap();
+            let mut t = TestHeap {
+                _arena: Box::new(Arena([0; ARENA])),
+                _guard: guard,
+            };
+            let start = t.base();
+            unsafe { heap::init(start, start.add(ARENA)) };
+            t
+        }
+        fn base(&mut self) -> *mut u8 {
+            self._arena.0.as_mut_ptr() as *mut u8
+        }
+    }
+
+    #[test]
+    fn alloc_free_reuse() {
+        let mut t = TestHeap::new();
+        unsafe {
+            let a = heap::alloc_raw(100, 32);
+            let b = heap::alloc_raw(200, 64);
+            assert!(!a.is_null() && !b.is_null());
+            assert_eq!(a as usize % 32, 0);
+            assert_eq!(b as usize % 64, 0);
+            assert!(b as usize - a as usize >= 96); // no overlap (a rounded to 96)
+            heap::free_block(a, 100);
+            heap::free_block(b, 200);
+            // after coalescing the whole arena is one block again
+            let whole = heap::alloc_raw(ARENA, 32);
+            assert_eq!(whole, t.base());
+        }
+    }
+
+    #[test]
+    fn best_fit_consumes_tightest_hole() {
+        let mut t = TestHeap::new();
+        let k = 1024usize;
+        unsafe {
+            let a = heap::alloc_raw(64 * k, 32);
+            let hole_big = heap::alloc_raw(96 * k, 32);
+            let b = heap::alloc_raw(64 * k, 32);
+            let hole_exact = heap::alloc_raw(64 * k, 32);
+            let pad = heap::alloc_raw(ARENA - 288 * k, 32);
+            assert!(!a.is_null() && !hole_big.is_null() && !b.is_null()
+                && !hole_exact.is_null() && !pad.is_null());
+            heap::free_block(hole_big, 96 * k);
+            heap::free_block(hole_exact, 64 * k);
+            // 64 KiB request: best-fit must land in the exact 64 KiB hole,
+            // first-fit would splinter the earlier 96 KiB hole.
+            let x = heap::alloc_raw(64 * k, 32);
+            assert_eq!(x, hole_exact, "64K must reuse the exact-size hole");
+            let _ = t;
+        }
+    }
+
+    #[test]
+    fn stress_then_full_coalesce() {
+        let mut t = TestHeap::new();
+        let mut live: Vec<(*mut u8, usize)> = Vec::new();
+        let mut rng: u32 = 0x1234_5678;
+        let mut next = move || {
+            rng ^= rng << 13;
+            rng ^= rng >> 17;
+            rng ^= rng << 5;
+            rng
+        };
+        unsafe {
+            for _ in 0..4096 {
+                if (next() % 5) < 3 {
+                    // alloc
+                    let size = ((next() as usize) % (8 * 1024)) / 32 * 32 + 32;
+                    let p = heap::alloc_raw(size, 32);
+                    if !p.is_null() {
+                        // stamp + verify unallocated memory doesn't alias
+                        for i in 0..size {
+                            *p.add(i) = (p as usize & 0xff) as u8;
+                        }
+                        live.push((p, size));
+                    }
+                } else if let Some(idx) = live.len().checked_sub(1).map(|n| (next() as usize) % (n + 1)) {
+                    let (p, size) = live.swap_remove(idx);
+                    for i in 0..size {
+                        assert_eq!(*p.add(i), (p as usize & 0xff) as u8, "block corrupted (overlap)");
+                    }
+                    heap::free_block(p, size);
+                }
+            }
+            for (p, s) in live {
+                heap::free_block(p, s);
+            }
+            let whole = heap::alloc_raw(ARENA, 32);
+            assert_eq!(whole, t.base(), "arena must coalesce back to one block");
+        }
+    }
+
+    #[test]
+    fn global_alloc_header_roundtrip() {
+        let mut t = TestHeap::new();
+        let a = heap::GcAllocator;
+        unsafe {
+            let l = Layout::from_size_align(1000, 16).unwrap();
+            let p1 = a.alloc(l);
+            assert!(!p1.is_null());
+            *p1 = 0xAA;
+            let p2 = a.alloc(l);
+            a.dealloc(p1, l);
+            // reuse after free
+            let p3 = a.alloc(l);
+            assert!(!p3.is_null());
+            a.dealloc(p2, l);
+            a.dealloc(p3, l);
+            let whole = heap::alloc_raw(ARENA, 32);
+            assert_eq!(whole, t.base());
+        }
     }
 }

@@ -9,13 +9,15 @@ via the in-tree `tools/gc-dol` host tool.
 - `powerpc-gekko-none-eabi.json` — custom rustc target spec
   (`powerpc-unknown-none` LLVM triple, `cpu = "750"`, `+fpu`,
   `panic-strategy = "abort"`, `linker = "rust-lld"`)
-- `memory.x.ld` — linker script (MEM1 0 x80003100, 24 MiB)
+- `memory.x.ld` — linker script (MEM1 24 MiB); reserves TWO worst-case
+  XFB slots at `__xfb_base` (0x81694000) for the VI flip chain.
 - `crates/gc-std/` — the platform library:
   - `crt0.rs` — `_start` (asm bring-up, BSS zero, stack). doc: basis is
     libogc's PPCEarlyInit (zlib), ported 1:1.
   - `hw.rs` — MMIO helpers, write-gather pipe, cache ops (`dcbf`, etc.),
     timebase (`mftb`), YAGCD addresses.
-  - `video.rs` — VI driver (libogc `video.c` port; NTSC/PAL IntDf + 480p).
+  - `video.rs` — VI driver (libogc `video.c` port; NTSC/PAL IntDf + 480p)
+    with a two-slot flip chain (`Video::flip`; `gx.end_frame` flips).
   - `console.rs`, `font.rs` — YUY2 text console + embedded 8x16 font.
   - `input.rs` — SI controller polling with origin calibration (cmd 0x41)
     and plug/unplug detect (port of libogc pad protocol).
@@ -24,11 +26,16 @@ via the in-tree `tools/gc-dol` host tool.
   - `gx.rs` — GX driver: pipe reg writers, immediate mode, TEV, dirty-state
     flush (port of libogc `gx.c`).
   - `gu.rs` — matrix math (pure Rust; Cephes-style sin/cos/sqrt inside).
-  - `audio.rs` — AI DMA PCM streaming (48 kHz stereo 16-bit, int-refill).
-  - `aram.rs` — sync ARAM DMA + crude block allocator (voice-bucket shaped).
-  - `dsp.rs` — DSP mailbox/task loader (and microcode upload for AESND-path).
+  - `audio.rs` — simple AI DMA PCM streaming (48 kHz stereo 16-bit,
+    int-refill).
+  - `aesnd.rs` — polyphonic DSP-mixer audio (port of libaesnd's host
+    protocol: voice parameter blocks, `0xface00xx` mailbox commands,
+    ARAM staging per voice).
+  - `aram.rs` — sync ARAM DMA + bump allocator (voice-bucket shaped).
+  - `dsp.rs` — DSP mailbox/task loader + AESND task interrupt plumbing.
   - `dspcode.rs` — byte paraphrase of libaesnd's DSP mixer microcode.
-  - `heap.rs` — free-list allocator over MEM1 for `alloc`.
+  - `heap.rs` — best-fit free-list allocator over MEM1 for `alloc`
+    (byte-exact splits; host-tested in tools/gc-host-tests).
   - `runtime.rs` — `#[panic_handler]` + `#[alloc_error_handler]`.
   - `system.rs` — `exit()` → reload stub at 0x80001800.
   - `timebase.rs` — `mftb` / microsecond sleeps.
@@ -41,7 +48,7 @@ via the in-tree `tools/gc-dol` host tool.
 - `make` — builds tool + all `dist/*.dol`.
 - `make <pkg>` — one example (names: hello-console, pad-input, heap-strings,
   video-info, pixel-plasma, gx-clear, gx-triangle, gx-cube, gx-textured-cube,
-  gx-lit-cube, irq-timer, pad-calibrated, audio-beep).
+  gx-lit-cube, irq-timer, pad-calibrated, audio-beep, dsp-mixer).
 - `make run EXAMPLE=<pkg>` — Dolphin.
 
 ## Conventions
@@ -61,7 +68,8 @@ via the in-tree `tools/gc-dol` host tool.
   1. `tools/gc-dol`: packer unit tests + validation of every `dist/*.dol`
      header (all addresses inside MEM1, entry = 0x80003100).
   2. `tools/gc-host-tests`: pure-Rust math (perspective/look-at/concat/
-     rotations) vs reference constants, tested on host.
+     rotations) vs reference constants, plus heap allocator
+     correctness/fragmentation suites, tested on host.
   3. `tests/dolphin-smoke.sh`: boots each `dist/*.dol` in headless Dolphin
      (flatpak) for 6s; panic/DSI/ISI/illegal-instruction = fail.
 - Run manually: `sh tests/dolphin-smoke.sh [names...]`,
