@@ -31,6 +31,7 @@
 
 extern crate alloc;
 
+pub mod adpcm;
 pub mod aesnd;
 pub mod aram;
 pub mod audio;

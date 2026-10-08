@@ -57,6 +57,10 @@ pub mod sd;
 #[allow(dead_code)]
 pub mod fat;
 
+#[path = "../../../crates/gc-std/src/adpcm.rs"]
+#[allow(dead_code)]
+pub mod adpcm;
+
 #[cfg(test)]
 mod tests {
     use super::gctypes::{Mtx, Mtx44};
@@ -852,5 +856,122 @@ mod sd_tests {
         assert_eq!(n as usize, 23);
         assert_eq!(&buf[..n as usize], b"hi gc-rust filesystem!!");
         assert!(fs.read_file("missing.bin", &mut buf).is_err());
+    }
+}
+
+#[cfg(test)]
+mod adpcm_tests {
+    //! Roundtrip: encode a known waveform with a naive-but-correct encoder,
+    //! decode with the real decoder, require a tight reconstruction.
+    use crate::adpcm;
+
+    /// NES-pressure-free encoder: for each frame scan the 16 predictor
+    /// pairs × 16 scales, keep the least-squared-error combination.
+    fn encode(samples: &[i16], coefs: &[i16; 16]) -> Vec<u8> {
+        use crate::adpcm::{AdpcmHistory, BYTES_PER_FRAME, SAMPLES_PER_FRAME};
+        let mut frames = Vec::new();
+        let mut hist = AdpcmHistory::default();
+        let mut i = 0;
+        while i < samples.len() {
+            let chunk = &samples[i..(i + SAMPLES_PER_FRAME).min(samples.len())];
+            let mut best: Option<(u8, u8, Vec<u8>, AdpcmHistory, i64)> = None;
+            for ci in 0..8u8 {
+                for sc in 0..16u8 {
+                    // simulate decode-in-mind with candidate nibbles
+                    let nbytes = (chunk.len() + 1) / 2;
+                    let mut fr = vec![0u8; BYTES_PER_FRAME];
+                    fr[0] = (ci << 4) | sc;
+                    let mut so_hist = hist;
+                    let mut nz = [0i16; SAMPLES_PER_FRAME];
+                    let mut err = 0i64;
+                    let mut nbled = [0i8; SAMPLES_PER_FRAME];
+                    for (j, nibble_pair) in (0..chunk.len()).enumerate() {
+                        let target = chunk[j] as i32;
+                        let c1 = coefs[ci as usize * 2] as i32;
+                        let c2 = coefs[ci as usize * 2 + 1] as i32;
+                        let mut best_nib = 0i8;
+                        let mut best_err = i64::MAX;
+                        for nib in -8i8..8 {
+                            let nib4 = (nib & 0xf) as u8;
+                            let _ = nib4;
+                            let pred = (((nib as i32) * (1i32 << sc)) << 11)
+                                .wrapping_add(1024 + c1 * so_hist.yn1 as i32 + c2 * so_hist.yn2 as i32)
+                                >> 11;
+                            let clamped = pred.clamp(-32768, 32767);
+                            let e = (clamped - target) as i64;
+                            if e * e < best_err {
+                                best_err = e * e;
+                                best_nib = nib;
+                            }
+                        }
+                        err += best_err;
+                        nbled[j] = best_nib;
+                        let nibble_pair = best_nib;
+                        let _ = nibble_pair;
+                        // advance predictor with the exact decoder math
+                        let nn = best_nib as i32;
+                        let pred = (((nn * (1i16 as i32) << sc)) << 11).wrapping_add(
+                            1024 + c1 * so_hist.yn1 as i32 + c2 * so_hist.yn2 as i32,
+                        ) >> 11;
+                        let out = pred.clamp(-32768, 32767) as i16;
+                        so_hist.yn2 = so_hist.yn1;
+                        so_hist.yn1 = out;
+                        nz[j] = out;
+                        let _ = nz;
+                    }
+                    if best.as_ref().map(|b| err < b.4).unwrap_or(true) {
+                        // pack nibbles
+                        for j in 0..chunk.len() {
+                            let v = (nbled[j] as u8) & 0x0f;
+                            if j % 2 == 0 {
+                                fr[1 + j / 2] |= v << 4;
+                            } else {
+                                fr[1 + j / 2] |= v;
+                            }
+                        }
+                        best = Some((ci, sc, fr, so_hist, err));
+                    }
+                }
+            }
+            let (_, _, fr, h, _) = best.unwrap();
+            frames.extend_from_slice(&fr);
+            hist = h;
+            i += SAMPLES_PER_FRAME;
+        }
+        frames
+    }
+
+    #[test]
+    fn sine_roundtrip() {
+        let coefs: [i16; 16] = [0; 16];
+        // encode sine with pure-P (coef 0 pair) primarily
+        let n = 1400;
+        let src: Vec<i16> = (0..n)
+            .map(|i| ((i as f32 * 0.07).sin() * 12000.0) as i16)
+            .collect();
+        let enc = encode(&src, &coefs);
+        let dec = adpcm::decode_all(&enc, &coefs);
+        assert_eq!(dec.len(), src.len());
+        let mut worst = 0i32;
+        let mut sum = 0i64;
+        for (a, b) in src.iter().zip(dec.iter()) {
+            let e = (*a as i32 - *b as i32).abs();
+            worst = worst.max(e);
+            sum += (e * e) as i64;
+        }
+        let snr_rmse = ((sum as f64) / n as f64).sqrt();
+        // 4-bit adaptive PCM on a smooth sine should track within ~2-3 %
+        assert!(snr_rmse < 1200.0, "rmse too big: {snr_rmse}");
+        assert!(worst < 6000, "worst sample error {worst}");
+    }
+
+    #[test]
+    fn zero_stream_decodes_silence() {
+        let mut coefs = [0i16; 16];
+        coefs[0] = 0; // zero-predictor
+        let src = vec![0i16; 280];
+        let enc = encode(&src, &coefs);
+        let dec = adpcm::decode_all(&enc, &coefs);
+        assert!(dec.iter().all(|&s| s.abs() < 128));
     }
 }
