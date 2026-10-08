@@ -1,3 +1,12 @@
 /target
+/dist
+*.elf
+*.dol
 target/
 target-host/
+tools/gc-dol/target-host/
+tools/gc-host-tests/target-host/
+tools/dol/gc-dol
+*.o
+*.d
+*.map
