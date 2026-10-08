@@ -19,6 +19,34 @@ pub mod gu;
 #[allow(dead_code)]
 pub mod heap;
 
+// --- stubs the gc-std modules need when compiled into this crate ---------
+pub mod irq {
+    pub struct IrqLock;
+    impl IrqLock {
+        pub fn take() -> IrqLock {
+            IrqLock
+        }
+    }
+    impl Drop for IrqLock {
+        fn drop(&mut self) {}
+    }
+}
+pub mod hw {
+    pub unsafe fn dc_flush_range<T>(_p: *const T, _len: usize) {}
+    pub unsafe fn dc_invalidate_range<T>(_p: *const T, _len: usize) {}
+    pub fn mftb() -> u64 {
+        static mut T: u64 = 0;
+        unsafe {
+            T += 41_000;
+            *(&raw const T)
+        }
+    }
+}
+
+#[path = "../../../crates/gc-std/src/card.rs"]
+#[allow(dead_code)]
+pub mod card;
+
 #[cfg(test)]
 mod tests {
     use super::gctypes::{Mtx, Mtx44};
@@ -139,6 +167,279 @@ mod tests {
         assert_close(m[1][1], -1.0, "cos180 m11");
         assert_close(m[2][2], -1.0, "cos180 m22");
         assert_close(m[0][0], 1.0, "axis row m00");
+    }
+}
+
+#[cfg(test)]
+mod card_tests {
+    //! Emulated 2 MB memory card (Dolphin/libogc-compatible image format)
+    //! driving the real card.rs state machine end to end.
+    #![allow(non_snake_case)]
+
+    use crate::card;
+    use crate::card::CardBus;
+
+    const BLOCKS: u32 = 2048; // 16 Mbit card
+    const SS: u32 = 8192;
+
+    pub struct MockCard {
+        pub image: Vec<u8>,
+    }
+
+    fn checksum(img: &[u8]) -> (u16, u16) {
+        let mut cs1: u16 = 0;
+        let mut cs2: u16 = 0;
+        for i in 0..img.len() / 2 {
+            let w = u16::from_be_bytes([img[i * 2], img[i * 2 + 1]]);
+            cs1 = cs1.wrapping_add(w);
+            cs2 = cs2.wrapping_add(w ^ 0xffff);
+        }
+        if cs1 == 0xffff {
+            cs1 = 0;
+        }
+        if cs2 == 0xffff {
+            cs2 = 0;
+        }
+        (cs1, cs2)
+    }
+
+    impl MockCard {
+        /// Fresh card formatted exactly like `GCMemcard::Format` /
+        /// libogc `__card_formatregion`.
+        fn new_formatted() -> MockCard {
+            let mut img = vec![0xFFu8; (BLOCKS * SS) as usize];
+            // dir copies (sectors 1, 2): all 0xFF, dircntrl.updated = 0
+            for d in 1..=2usize {
+                let base = d * 8192;
+                img[base + 8186] = 0;
+                img[base + 8187] = 0;
+                let (c1, c2) = checksum(&img[base..base + 0x1ffc]);
+                img[base + 8188..base + 8190].copy_from_slice(&c1.to_be_bytes());
+                img[base + 8190..base + 8192].copy_from_slice(&c2.to_be_bytes());
+            }
+            // fat copies (sectors 3, 4): zeroed; freeblocks; lastalloc=4
+            for f in 3..=4usize {
+                let base = f * 8192;
+                for b in &mut img[base..base + 8192] {
+                    *b = 0;
+                }
+                let free = (BLOCKS - 5) as u16;
+                img[base + 6..base + 8].copy_from_slice(&free.to_be_bytes());
+                img[base + 8..base + 10].copy_from_slice(&4u16.to_be_bytes());
+                let (c1, c2) = checksum(&img[base + 4..base + 0x1ffc]);
+                img[base..base + 2].copy_from_slice(&c1.to_be_bytes());
+                img[base + 2..base + 4].copy_from_slice(&c2.to_be_bytes());
+            }
+            MockCard { image: img }
+        }
+    }
+
+    impl CardBus for MockCard {
+        fn probe(&mut self, _chn: u32) -> bool {
+            true
+        }
+        fn get_id(&mut self, _chn: u32) -> Option<u32> {
+            Some(0x10) // memcard251: 16 Mbit, 8 KiB sectors, latency 4
+        }
+        fn clear_status(&mut self, _chn: u32) -> Result<(), i32> {
+            Ok(())
+        }
+        fn read_status(&mut self, _chn: u32) -> Result<u8, i32> {
+            Ok(0x40) // unlocked, ready
+        }
+        fn enable_interrupt(&mut self, _chn: u32, _on: bool) -> Result<(), i32> {
+            Ok(())
+        }
+        fn read(&mut self, _chn: u32, addr: u32, _latency: u32, buf: &mut [u8]) -> i32 {
+            let a = addr as usize;
+            if a + buf.len() > self.image.len() {
+                return card::CARD_ERROR_FATAL_ERROR;
+            }
+            buf.copy_from_slice(&self.image[a..a + buf.len()]);
+            card::CARD_ERROR_READY
+        }
+        fn write_sector(&mut self, _chn: u32, addr: u32, buf: &[u8]) -> i32 {
+            let a = addr as usize;
+            if a + buf.len() > self.image.len() {
+                return card::CARD_ERROR_FATAL_ERROR;
+            }
+            self.image[a..a + buf.len()].copy_from_slice(buf);
+            card::CARD_ERROR_READY
+        }
+        fn erase_sector(&mut self, _chn: u32, addr: u32) -> i32 {
+            let a = addr as usize;
+            for b in &mut self.image[a..a + SS as usize] {
+                *b = 0xFF;
+            }
+            card::CARD_ERROR_READY
+        }
+    }
+
+    /// Test fixture: 'static mock wired into the driver; tests are
+    /// serialized (the driver keeps global state).
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct Fixture {
+        card: core::ptr::NonNull<MockCard>,
+        _g: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl Fixture {
+        fn img(&mut self) -> &mut Vec<u8> {
+            unsafe { &mut self.card.as_mut().image }
+        }
+    }
+
+    fn fixture() -> Fixture {
+        let g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let m: &'static mut MockCard = Box::leak(Box::new(MockCard::new_formatted()));
+        let ptr = unsafe { core::ptr::NonNull::new_unchecked(m as *mut MockCard) };
+        unsafe { card::set_bus(m) };
+        card::test_reset();
+        card::init(None, None);
+        Fixture { card: ptr, _g: g }
+    }
+
+    #[test]
+    fn mount_fresh_card() {
+        struct FixtureGuard; // placeholder to keep style uniform
+        {
+            let mut _m = fixture();
+            assert_eq!(card::mount(0), card::CARD_ERROR_READY);
+            assert_eq!(card::free_blocks(0), Ok(BLOCKS as u16 - 5));
+            assert!(card::find_first(0, true).is_err());
+        }
+    }
+
+    #[test]
+    fn create_write_read_verify() {
+        let mut _m = fixture();
+        assert_eq!(card::mount(0), card::CARD_ERROR_READY);
+        let mut f = card::create(0, "test.sav", SS).expect("create");
+        let data: Vec<u8> = (0..SS).map(|i| (i * 7 + 3) as u8).collect();
+        assert_eq!(card::write(&mut f, &data, 0), card::CARD_ERROR_READY);
+
+        // re-open and read back
+        let mut f2 = card::open(0, "test.sav").expect("open");
+        let mut back = vec![0u8; SS as usize];
+        assert_eq!(card::read(&mut f2, &mut back, 0), card::CARD_ERROR_READY);
+        assert_eq!(back, data, "read-back must match what was written");
+
+        let mut dir = card::find_first(0, true).expect("find_first");
+        let n = dir.filename.iter().position(|&c| c == 0).unwrap_or(32);
+        assert_eq!(&dir.filename[..n], b"test.sav");
+        assert_eq!(dir.filelen, SS);
+        assert_eq!(card::find_next(&mut dir), card::CARD_ERROR_NOFILE);
+        assert_eq!(card::free_blocks(0), Ok(BLOCKS as u16 - 6));
+    }
+
+    #[test]
+    fn duplicate_name_rejected_and_delete_recovers() {
+        let mut _m = fixture();
+        assert_eq!(card::mount(0), card::CARD_ERROR_READY);
+        let mut f = card::create(0, "dup.sav", SS).expect("create");
+        assert_eq!(card::create(0, "dup.sav", SS).err(), Some(card::CARD_ERROR_EXIST));
+        let payload = vec![0xABu8; SS as usize];
+        card::write(&mut f, &payload, 0);
+        assert_eq!(card::delete(0, "dup.sav"), card::CARD_ERROR_READY);
+        assert!(card::open(0, "dup.sav").is_err());
+        assert_eq!(card::free_blocks(0), Ok(BLOCKS as u16 - 5));
+    }
+
+    #[test]
+    fn multi_sector_chain_roundtrip() {
+        let mut _m = fixture();
+        assert_eq!(card::mount(0), card::CARD_ERROR_READY);
+        let sectors = 3u32;
+        let mut f = card::create(0, "big.sav", SS * sectors).expect("create");
+        let data: Vec<u8> = (0..SS * sectors).map(|i| (i / 7 % 251) as u8).collect();
+        for s in 0..sectors {
+            let off = (s * SS) as i32;
+            let w = &data[(s * SS) as usize..((s + 1) * SS) as usize];
+            assert_eq!(card::write(&mut f, w, off), card::CARD_ERROR_READY);
+        }
+        let mut back = vec![0u8; (SS * sectors) as usize];
+        for s in 0..sectors {
+            let off = (s * SS) as i32;
+            assert_eq!(
+                card::read(&mut f, &mut back[off as usize..(off as usize + SS as usize)], off),
+                card::CARD_ERROR_READY
+            );
+        }
+        assert_eq!(back, data);
+    }
+
+    #[test]
+    fn fills_card_then_insspace() {
+        let mut _m = fixture();
+        assert_eq!(card::mount(0), card::CARD_ERROR_READY);
+        let free = card::free_blocks(0).unwrap() as u32;
+        card::create(0, "all.sav", free * SS).expect("huge create must fit");
+        assert_eq!(card::free_blocks(0), Ok(0));
+        assert_eq!(card::create(0, "nope.sav", SS).err(), Some(card::CARD_ERROR_INSSPACE));
+        // deleting the huge file returns every block
+        assert_eq!(card::delete(0, "all.sav"), card::CARD_ERROR_READY);
+        assert_eq!(card::free_blocks(0).unwrap(), free as u16);
+    }
+
+    #[test]
+    fn mount_repairs_one_corrupt_dir_copy() {
+        let mut _m = fixture();
+        assert_eq!(card::mount(0), card::CARD_ERROR_READY);
+        let mut f = card::create(0, "keep.sav", SS).unwrap();
+        card::write(&mut f, &[7u8; SS as usize], 0);
+        // flip one byte inside the active dir copy in the image
+        // (create committed dir copy 0; corrupt sector 1 entirely)
+        let mi = _m.img();
+        for b in &mut mi[8192..8192 + 64] {
+            *b ^= 0x5A;
+        }
+        card::unmount(0);
+        assert_eq!(card::mount(0), card::CARD_ERROR_READY, "mount must repair from the good copy");
+        let mut f2 = card::open(0, "keep.sav").expect("file must survive repair");
+        let mut back = vec![0u8; SS as usize];
+        assert_eq!(card::read(&mut f2, &mut back, 0), card::CARD_ERROR_READY);
+        assert!(back.iter().all(|&b| b == 7));
+    }
+
+    #[test]
+    fn both_dir_copies_corrupt_is_broken() {
+        let mut _m = fixture();
+        let mi = _m.img();
+        for d in 1..=2usize {
+            mi[d * 8192 + 8186] = 1; // invalidate each dir copy's checksums
+        }
+        assert_eq!(card::mount(0), card::CARD_ERROR_BROKEN);
+    }
+
+    #[test]
+    fn data_actually_lands_in_card_image() {
+        let mut _m = fixture();
+        assert_eq!(card::mount(0), card::CARD_ERROR_READY);
+        let mut f = card::create(0, "vis.sav", SS).expect("create");
+        let data: Vec<u8> = (0..SS as u32).map(|i| (0x80u8).wrapping_add((i & 0x7f) as u8)).collect();
+        assert_eq!(card::write(&mut f, &data, 0), card::CARD_ERROR_READY);
+        // walk the FAT chain on the raw image and expect our bytes there.
+        let fat_base = 3 * 8192; // active fat at commit time is sector 3 or 4
+        let blk = {
+            // read directory to find first block of vis.sav
+            let img = _m.img();
+            let mut found = None;
+            for d in [1usize, 4usize] {
+                for i in 0..127 {
+                    let o = d * 8192 + i * 64;
+                    if &img[o + 8..o + 16] == b"vis.sav\0" {
+                        found = Some(u16::from_be_bytes([img[o + 54], img[o + 55]]));
+                        break;
+                    }
+                }
+            }
+            found.expect("dir entry on card")
+        } as usize;
+        assert!(blk >= 5 && blk < BLOCKS as usize);
+        let img = _m.img();
+        assert_eq!(&img[blk * 8192..blk * 8192 + 16], &data[..16]);
+        let _ = fat_base;
     }
 }
 

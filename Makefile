@@ -26,7 +26,9 @@ EXAMPLES := \
 	pad-calibrated \
 	audio-beep \
 	dsp-mixer \
-	exi-sram
+	exi-sram \
+	memcard \
+	usb-gecko
 
 DOLS := $(addprefix dist/,$(addsuffix .dol,$(EXAMPLES)))
 

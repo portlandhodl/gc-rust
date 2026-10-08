@@ -34,6 +34,7 @@ extern crate alloc;
 pub mod aesnd;
 pub mod aram;
 pub mod audio;
+pub mod card;
 pub mod console;
 pub mod dsp;
 pub mod dspcode;
@@ -48,6 +49,7 @@ pub mod irq;
 pub mod sram;
 pub mod system;
 pub mod timebase;
+pub mod usbgecko;
 pub mod video;
 
 mod crt0;

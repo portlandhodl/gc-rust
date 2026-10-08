@@ -33,6 +33,7 @@ pub const EXI_SPEED32MHZ: u32 = 5;
 
 pub const EXI_READ: u32 = 0;
 pub const EXI_WRITE: u32 = 1;
+pub const EXI_READWRITE: u32 = 2;
 
 // CSR bits (u32 view)
 const EXI_DEVICE0: u32 = 0x0080;
