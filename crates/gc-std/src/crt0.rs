@@ -204,7 +204,4 @@ pub extern "C" fn __gc_rust_start() -> ! {
     }
     let _ = unsafe { main() };
     crate::system::exit_to_loader();
-    loop {
-        unsafe { crate::hw::isync() };
-    }
 }

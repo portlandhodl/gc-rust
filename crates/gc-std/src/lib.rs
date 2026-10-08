@@ -38,7 +38,9 @@ pub mod gx;
 mod heap;
 pub mod hw;
 pub mod input;
+pub mod irq;
 pub mod system;
+pub mod timebase;
 pub mod video;
 
 mod crt0;
@@ -99,6 +101,7 @@ pub fn init() -> Gc {
     if INITIALIZED.swap(true, Ordering::AcqRel) {
         panic!("gc_std::init() called twice");
     }
+    irq::init();
     input::init();
     let video = video::init();
     Gc {

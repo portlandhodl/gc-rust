@@ -21,7 +21,9 @@ EXAMPLES := \
 	gx-triangle \
 	gx-cube \
 	gx-textured-cube \
-	gx-lit-cube
+	gx-lit-cube \
+	irq-timer \
+	pad-calibrated
 
 DOLS := $(addprefix dist/,$(addsuffix .dol,$(EXAMPLES)))
 

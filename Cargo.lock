@@ -56,6 +56,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "irq-timer"
+version = "0.1.0"
+dependencies = [
+ "gc-std",
+]
+
+[[package]]
+name = "pad-calibrated"
+version = "0.1.0"
+dependencies = [
+ "gc-std",
+]
+
+[[package]]
 name = "pad-input"
 version = "0.1.0"
 dependencies = [

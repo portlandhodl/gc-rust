@@ -9,10 +9,6 @@
 use crate::gctypes::GXRModeObj;
 use crate::hw::{self, vi_read, vi_write};
 
-pub const VI_NTSC: u32 = 0;
-pub const VI_PAL: u32 = 1;
-pub const VI_MPAL: u32 = 2;
-
 /// libogc `struct _timing`.
 #[derive(Copy, Clone)]
 struct VideoTiming {
@@ -39,9 +35,34 @@ struct VideoTiming {
     hbs640: u16,
 }
 
-// vi mode = tv<<2 | interlace. Index 0/1 = NTSC int/nint, 2/3 = PAL int/nint.
-static TIMINGS: [VideoTiming; 4] = [
-    // NTSC interlaced (VI_TVMODE_NTSC_INT)
+pub const VI_NTSC: u32 = 0;
+pub const VI_PAL: u32 = 1;
+pub const VI_MPAL: u32 = 2;
+pub const VI_EURGB60: u32 = 5; // 60 Hz PAL-ish
+
+/// Video standard.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Standard {
+    Ntsc,
+    Pal,
+    Mpal,
+    EurRgb60,
+}
+
+/// Frame mode (progressive vs interlaced).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum FrameMode {
+    Interlaced,
+    Progressive,
+}
+
+// Timing-table index for (tv, progressive):
+//   0 = NTSC interlaced, 1 = NTSC progressive
+//   2 = PAL  interlaced, 3 = PAL  progressive
+//   4 = MPAL interlaced, 5 = MPAL progressive
+// (EURGB60 uses the NTSC progression in libogc's table.)
+static TIMINGS: [VideoTiming; 6] = [
+    // 0: NTSC interlaced
     VideoTiming {
         equ: 0x06, acv: 0x00F0,
         prb_odd: 0x0018, prb_even: 0x0019, psb_odd: 0x0003, psb_even: 0x0002,
@@ -50,16 +71,16 @@ static TIMINGS: [VideoTiming; 4] = [
         nhlines: 0x020D, hlw: 0x01AD,
         hsy: 0x40, hcs: 0x47, hce: 0x69, hbe640: 0xA2, hbs640: 0x0175,
     },
-    // NTSC non-interlaced
+    // 1: NTSC progressive (entry 6 in libogc's table: 480p)
     VideoTiming {
-        equ: 0x06, acv: 0x00F0,
-        prb_odd: 0x0018, prb_even: 0x0018, psb_odd: 0x0004, psb_even: 0x0004,
-        bs1: 0x0C, bs2: 0x0C, bs3: 0x0C, bs4: 0x0C,
-        be1: 0x0208, be2: 0x0208, be3: 0x0208, be4: 0x0208,
-        nhlines: 0x020E, hlw: 0x01AD,
+        equ: 0x0C, acv: 0x01E0,
+        prb_odd: 0x0030, prb_even: 0x0030, psb_odd: 0x0006, psb_even: 0x0006,
+        bs1: 0x18, bs2: 0x18, bs3: 0x18, bs4: 0x18,
+        be1: 0x040E, be2: 0x040E, be3: 0x040E, be4: 0x040E,
+        nhlines: 0x041A, hlw: 0x01AD,
         hsy: 0x40, hcs: 0x47, hce: 0x69, hbe640: 0xA2, hbs640: 0x0175,
     },
-    // PAL interlaced (VI_TVMODE_PAL_INT)
+    // 2: PAL interlaced
     VideoTiming {
         equ: 0x05, acv: 0x0120,
         prb_odd: 0x0021, prb_even: 0x0022, psb_odd: 0x0001, psb_even: 0x0000,
@@ -68,16 +89,43 @@ static TIMINGS: [VideoTiming; 4] = [
         nhlines: 0x0271, hlw: 0x01B0,
         hsy: 0x40, hcs: 0x4B, hce: 0x6A, hbe640: 0xAC, hbs640: 0x017C,
     },
-    // PAL non-interlaced
+    // 3: PAL progressive
     VideoTiming {
-        equ: 0x05, acv: 0x0120,
-        prb_odd: 0x0021, prb_even: 0x0021, psb_odd: 0x0000, psb_even: 0x0000,
-        bs1: 0x0D, bs2: 0x0B, bs3: 0x0D, bs4: 0x0B,
-        be1: 0x026B, be2: 0x026D, be3: 0x026B, be4: 0x026D,
-        nhlines: 0x0270, hlw: 0x01B0,
+        equ: 0x0A, acv: 0x0240,
+        prb_odd: 0x0044, prb_even: 0x0044, psb_odd: 0x0000, psb_even: 0x0000,
+        bs1: 0x14, bs2: 0x14, bs3: 0x14, bs4: 0x14,
+        be1: 0x04D8, be2: 0x04D8, be3: 0x04D8, be4: 0x04D8,
+        nhlines: 0x04E2, hlw: 0x01B0,
         hsy: 0x40, hcs: 0x4B, hce: 0x6A, hbe640: 0xAC, hbs640: 0x017C,
     },
+    // 4: MPAL interlaced (entry 4 in libogc's table)
+    VideoTiming {
+        equ: 0x06, acv: 0x00F0,
+        prb_odd: 0x0018, prb_even: 0x0019, psb_odd: 0x0003, psb_even: 0x0002,
+        bs1: 0x10, bs2: 0x0F, bs3: 0x0E, bs4: 0x0D,
+        be1: 0x0206, be2: 0x0205, be3: 0x0204, be4: 0x0207,
+        nhlines: 0x020D, hlw: 0x01AD,
+        hsy: 0x40, hcs: 0x4E, hce: 0x70, hbe640: 0xA2, hbs640: 0x0175,
+    },
+    // 5: MPAL progressive (same shape as NTSC-prog but MPAL sync)
+    VideoTiming {
+        equ: 0x0C, acv: 0x01E0,
+        prb_odd: 0x0030, prb_even: 0x0030, psb_odd: 0x0006, psb_even: 0x0006,
+        bs1: 0x18, bs2: 0x18, bs3: 0x18, bs4: 0x18,
+        be1: 0x040E, be2: 0x040E, be3: 0x040E, be4: 0x040E,
+        nhlines: 0x041A, hlw: 0x01AD,
+        hsy: 0x40, hcs: 0x4E, hce: 0x70, hbe640: 0xA2, hbs640: 0x0175,
+    },
 ];
+
+fn timing_index(standard: Standard, mode: FrameMode) -> usize {
+    let s = match standard {
+        Standard::Ntsc | Standard::EurRgb60 => 0,
+        Standard::Pal => 2,
+        Standard::Mpal => 4,
+    };
+    s + (mode == FrameMode::Progressive) as usize
+}
 
 /// VI copy-filter taps (defaults from libogc).
 static TAPS: [u16; 26] = [
@@ -145,18 +193,32 @@ static mut CURRENT: Video = Video {
     framebuffer: core::ptr::null_mut(),
 };
 
-fn int_df_mode(tv: u32) -> GXRModeObj {
-    let height = if tv == VI_PAL { 576u16 } else { 480u16 };
+/// Build a `GXRModeObj` matching libogc's IntDf/Prog modes for the given
+/// standard and frame mode — this is the shape of TVNtsc480IntDf etc.
+fn mode_for(standard: Standard, fm: FrameMode) -> GXRModeObj {
+    let interlaced = fm == FrameMode::Interlaced;
+    let progressive = fm == FrameMode::Progressive;
+    let (height_576, fb_h) = match standard {
+        Standard::Pal => (true, 576u16),
+        Standard::Ntsc | Standard::Mpal | Standard::EurRgb60 => (false, 480u16),
+    };
+    let tv_bits = match standard {
+        Standard::Ntsc => 0u32,
+        Standard::Pal => 1u32,
+        Standard::Mpal => 2u32,
+        Standard::EurRgb60 => 5u32,
+    };
+    let interlace_bits = if progressive { 2u32 } else if interlaced { 0u32 } else { 1u32 };
     GXRModeObj {
-        viTVMode: tv << 2, // interlaced
+        viTVMode: (tv_bits << 2) | interlace_bits,
         fbWidth: 640,
-        efbHeight: height,
-        xfbHeight: height,
+        efbHeight: fb_h,
+        xfbHeight: if progressive { fb_h } else { fb_h },
         viXOrigin: 40,
         viYOrigin: 0,
         viWidth: 640,
-        viHeight: height,
-        xfbMode: 1, // DF
+        viHeight: if height_576 { 528 } else { 480 },
+        xfbMode: if progressive { 0 } else { 1 }, // DF when interlaced
         field_rendering: 0,
         aa: 0,
         sample_pattern: [[6; 2]; 12],
@@ -193,9 +255,19 @@ pub(crate) fn init() -> Video {
         vi_write(36, 0x2828);
 
         let dcr = vi_read(1);
-        let tvmode = hw::shiftr(u32::from(dcr), 8, 2);
+        let tvmode_bits = hw::shiftr(u32::from(dcr), 8, 2);
+        let nonint = hw::shiftr(u32::from(dcr), 2, 1);
+        let _ = nonint; // currently unused; VI_DCR's DFP bit would select progressive
 
-        let mode = int_df_mode(tvmode);
+        // decode TV standard; anything unusual defaults to what the loader left
+        let standard = match tvmode_bits {
+            0 => Standard::Ntsc,
+            1 => Standard::Pal,
+            2 => Standard::Mpal,
+            5 => Standard::EurRgb60,
+            _ => Standard::Ntsc,
+        };
+        let mode = mode_for(standard, FrameMode::Interlaced);
         // The XFB lives at a *fixed* cached address from the linker script;
         // the heap ends just below it. This keeps the framebuffer at a
         // known location for tests and Dual-homing GX copies.
@@ -215,9 +287,10 @@ pub(crate) fn init() -> Video {
     }
 }
 
-/// `__VIInit` port for a timing slot.
+/// `__VIInit` port for a timing slot. On NTSC-interlaced default the slot
+/// index is 0; progressive NTSC is 1.
 unsafe fn vi_reset_with(idx: u32) {
-    let cur = &TIMINGS[(idx & 3) as usize];
+    let cur = &TIMINGS[(idx as usize) % TIMINGS.len()];
     vi_write(1, 0x02);
     for _ in 0..1000 {
         core::hint::spin_loop();
@@ -245,19 +318,66 @@ unsafe fn vi_reset_with(idx: u32) {
     vi_write(27, 0x0001);
     vi_write(36, 0x2828);
 
-    let tvmode = (idx >> 2) as u16;
-    let interlace = (idx & 1) as u16;
+    let tvmode: u16 = 0;
+    let interlace: u16 = 0;
     vi_write(1, (tvmode << 8) | (interlace << 2) | 0x0001);
     vi_write(54, 0x0000);
 }
 
-/// VIDEO_Configure port (centered 640-wide, dispPosY=0, DF XFB).
+/// Switch to a user-selected mode after init.
+pub fn set_mode(v: &Video, standard: Standard, fm: FrameMode) -> Video {
+    unsafe {
+        let mode = mode_for(standard, fm);
+        let fb = v.framebuffer;
+        configure(&mode, fb);
+        hw::sync();
+        let nv = Video { mode, framebuffer: fb };
+        *core::ptr::addr_of_mut!(CURRENT) = nv;
+        nv
+    }
+}
+
+impl Video {
+    /// Switch to progressive 480p. Only valid if the sink supports it;
+    /// the GameCube can't know, so this trusts the caller.
+    pub fn progressive(&self) -> Video {
+        set_mode(self, standard_of(&self.mode), FrameMode::Progressive)
+    }
+
+    /// The current TV standard.
+    pub fn standard(&self) -> Standard {
+        standard_of(&self.mode)
+    }
+
+    /// Whether the current mode is progressive.
+    pub fn is_progressive(&self) -> bool {
+        (self.mode.viTVMode & 3) == 2
+    }
+}
+
+fn standard_of(mode: &GXRModeObj) -> Standard {
+    match hw::shiftr(mode.viTVMode, 2, 3) {
+        0 => Standard::Ntsc,
+        1 => Standard::Pal,
+        2 => Standard::Mpal,
+        5 => Standard::EurRgb60,
+        _ => Standard::Ntsc,
+    }
+}
+
+/// VIDEO_Configure port (centered 640-wide, dispPosY=0).
 fn configure(mode: &GXRModeObj, fb: *mut core::ffi::c_void) {
-    let t = &TIMINGS[(mode.viTVMode & 3) as usize];
+    let standard = standard_of(mode);
+    let fm = if (mode.viTVMode & 3) == 2 { FrameMode::Progressive } else { FrameMode::Interlaced };
+    let t = &TIMINGS[timing_index(standard, fm)];
     let tvmode = hw::shiftr(mode.viTVMode, 2, 3);
     let nonint = mode.viTVMode & 1;
+    let progressive = fm == FrameMode::Progressive;
 
     unsafe {
+        let mut r54 = vi_read(54) & !0x0001;
+        if progressive { r54 |= 1; }
+        vi_write(54, r54);
         let mut dcr = vi_read(1) & !0x030cu16;
         dcr |= ((nonint as u16) << 2) | (((tvmode as u16) & 3) << 8);
         vi_write(1, dcr);
@@ -271,7 +391,7 @@ fn configure(mode: &GXRModeObj, fb: *mut core::ffi::c_void) {
         let val2 = (t.hbs640 as u32 + disp_pos_x as u32 + 40)
             .wrapping_sub(720 - disp_size_x as u32) & 0x03ff;
         vi_write(4, ((val1 >> 9) | (val2 << 1)) as u16);
-        vi_write(5, (((val1 << 7) as u16) | t.hsy));
+        vi_write(5, ((val1 << 7) as u16) | t.hsy);
 
         vi_write(10, (t.be3 << 5) | t.bs3);
         vi_write(11, (t.be1 << 5) | t.bs1);

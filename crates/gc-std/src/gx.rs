@@ -325,8 +325,6 @@ pub(crate) fn init(video: &Video) -> Context {
     // "GX_Init" baseline: set up magic regs written by libogc __gx_init.
     // Divider constants (bus clock = 162 MHz):
     let divis_res = 162_000_000u32 / 500;
-    flush();
-    load_bp(0x6900_0000 | (((divis_res >> 11) & 0x7f_ffff) | 0x0400));
     let res2 = divis_res / 4224;
     flush();
     load_bp(0x4600_0000 | (res2 | 0x0200));
@@ -789,7 +787,7 @@ pub fn set_vtx_attr_fmt(vtxfmt: u8, attr: u8, comptype: u8, compfmt: u8, frac: u
             }
         }
         GX_VA_NRM => {
-            g.vat0[vat] = (g.vat0[vat] & !0x200);
+            g.vat0[vat] &= !0x200;
             g.vat0[vat] = (g.vat0[vat] & !0x1C00) | hw::shiftl(cf, 10, 3);
             g.vat0[vat] &= !0x8000_0000;
         }
@@ -910,11 +908,9 @@ fn copy_disp() {
     load_bp(g.disp_copy_wh);
     load_bp(g.disp_copy_dst);
 
-    unsafe {
-        let fb = crate::video::current_xfb();
-        let v = 0x4b00_0000 | (hw::shiftr(hw::virt_to_phys(fb), 5, 24));
-        load_bp(v);
-    }
+    let fb = crate::video::current_xfb();
+    let v = 0x4b00_0000 | (hw::shiftr(hw::virt_to_phys(fb), 5, 24));
+    load_bp(v);
     let mut cntrl = (0x52u32 << 24) | (g.disp_copy_cntrl & 0x00ff_ffff);
     cntrl = (cntrl & !0x800) | hw::shiftl(1, 11, 1); // clear=1
     cntrl = (cntrl & !0x4000) | 0x4000;

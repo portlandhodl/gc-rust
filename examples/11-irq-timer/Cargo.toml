@@ -1,0 +1,8 @@
+[package]
+name = "irq-timer"
+version = "0.1.0"
+edition = "2021"
+description = "gc-rust example: PI interrupts + VI retrace callback"
+
+[dependencies]
+gc-std = { path = "../../crates/gc-std" }

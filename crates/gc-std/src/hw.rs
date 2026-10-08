@@ -39,7 +39,7 @@ pub const fn phys(addr: u32) -> u32 {
 /// K0 (cached) -> K1 (uncached) address conversion.
 #[inline(always)]
 pub fn cached_to_uncached<T>(p: *mut T) -> *mut T {
-    (((p as usize).wrapping_add((MEM_BASE_UNCACHED - MEM_BASE_CACHED) as usize)) as *mut T)
+    (p as usize).wrapping_add((MEM_BASE_UNCACHED - MEM_BASE_CACHED) as usize) as *mut T
 }
 
 /// Virtual (0x8...) -> physical (0x0...) address conversion.
@@ -163,21 +163,31 @@ pub unsafe fn sync() {
     core::arch::asm!("sync");
 }
 
-/// `isync` instruction.
+/// `isync` instruction (barrier against subsequent instruction fetches).
 #[inline(always)]
 pub unsafe fn isync() {
     core::arch::asm!("isync");
+}
+
+/// `dcbf` - data-cache block flush (write-back) for `addr`.
+#[inline(always)]
+pub unsafe fn dcbf(addr: *const u8) {
+    core::arch::asm!("dcbf 0, {addr}", addr = in(reg) addr);
+}
+
+/// `dcbi` - data-cache block invalidate for `addr`.
+#[inline(always)]
+pub unsafe fn dcbi(addr: *const u8) {
+    core::arch::asm!("dcbi 0, {addr}", addr = in(reg) addr);
 }
 
 /// Busy-wait for `us` microseconds using the ~40.5 MHz timebase
 /// (40 ticks/µs close enough for our settle waits).
 pub fn gcdelay(us: u32) {
     let ticks = (us as u64).saturating_mul(40);
-    unsafe {
-        let start = mftb();
-        while mftb().wrapping_sub(start) < ticks {
-            core::hint::spin_loop();
-        }
+    let start = mftb();
+    while mftb().wrapping_sub(start) < ticks {
+        core::hint::spin_loop();
     }
 }
 

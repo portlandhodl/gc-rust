@@ -12,8 +12,8 @@ pub fn exit_to_loader() -> ! {
         let reload: extern "C" fn() = core::mem::transmute(0x8000_1800usize);
         reload();
     }
-    // unreachable on real loaders; stay here if we get back
+    // If the loader's stub returns (shouldn't), idle forever.
     loop {
-        unsafe { crate::hw::isync() };
+        unsafe { core::arch::asm!("isync") };
     }
 }

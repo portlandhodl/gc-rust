@@ -1,0 +1,8 @@
+[package]
+name = "pad-calibrated"
+version = "0.1.0"
+edition = "2021"
+description = "gc-rust example: pad origin calibration + hot plug detection"
+
+[dependencies]
+gc-std = { path = "../../crates/gc-std" }
