@@ -1,0 +1,8 @@
+[package]
+name = "sd-file"
+version = "0.1.0"
+edition = "2021"
+description = "gc-rust example: read files from a FAT SD-card via SD Gecko"
+
+[dependencies]
+gc-std = { path = "../../crates/gc-std" }

@@ -528,8 +528,6 @@ mod exi_bus {
     }
 }
 
-#[cfg(target_arch = "powerpc")]
-use exi_bus::ExiBus as _ExiBus;
 
 // ---------------------------------------------------------------------------
 // directory / FAT image accessors

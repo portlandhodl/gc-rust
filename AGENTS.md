@@ -35,6 +35,10 @@ via the in-tree `tools/gc-dol` host tool.
     runs the real state machine against it.
   - `usbgecko.rs` — USB Gecko debug channel (host-visible over TCP 55020
     under Dolphin's Gecko emulation).
+  - `sd.rs` — SD/SDHC block IO over SD Gecko (SPI mode, CMD0/8/16/17/24/41/
+    55/58 per sdgecko_io.c; `SdSpi` trait; console path drives EXI).
+  - `fat.rs` — read-only FAT16/FAT32 (MBR or superfloppy, 8.3 names,
+    whole-file reads) over any 512-byte `BlockIo` backend.
   - `audio.rs` — simple AI DMA PCM streaming (48 kHz stereo 16-bit,
     int-refill).
   - `aesnd.rs` — polyphonic DSP-mixer audio (port of libaesnd's host
@@ -58,7 +62,7 @@ via the in-tree `tools/gc-dol` host tool.
 - `make <pkg>` — one example (names: hello-console, pad-input, heap-strings,
   video-info, pixel-plasma, gx-clear, gx-triangle, gx-cube, gx-textured-cube,
   gx-lit-cube, irq-timer, pad-calibrated, audio-beep, dsp-mixer, exi-sram,
-  memcard, usb-gecko).
+  memcard, usb-gecko, sd-file).
 - `tests/memcard-persist.sh` / `tests/usbgecko-e2e.sh` — manual E2E tests
   (need desktop Dolphin; not wired into `make check`).
 - `make run EXAMPLE=<pkg>` — Dolphin.
@@ -81,8 +85,9 @@ via the in-tree `tools/gc-dol` host tool.
      header (all addresses inside MEM1, entry = 0x80003100).
   2. `tools/gc-host-tests`: pure-Rust math (perspective/look-at/concat/
      rotations) vs reference constants, heap allocator
-     correctness/fragmentation suites, and a memory-card emulation suite
-     driving the real card.rs state machine, tested on host.
+     correctness/fragmentation suites, a memory-card emulation suite
+     driving the real card.rs state machine, and an SPI-level emulated SD
+     card with a FAT32 image driving sd.rs + fat.rs, tested on host.
   3. `tests/dolphin-smoke.sh`: boots each `dist/*.dol` in headless Dolphin
      (flatpak) for 6s; panic/DSI/ISI/illegal-instruction = fail.
 - Run manually: `sh tests/dolphin-smoke.sh [names...]`,

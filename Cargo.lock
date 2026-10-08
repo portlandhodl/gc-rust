@@ -112,6 +112,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "sd-file"
+version = "0.1.0"
+dependencies = [
+ "gc-std",
+]
+
+[[package]]
 name = "usb-gecko"
 version = "0.1.0"
 dependencies = [

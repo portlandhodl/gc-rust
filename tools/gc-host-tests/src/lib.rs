@@ -3,6 +3,8 @@
 //! We include `gu.rs` and `gctypes.rs` verbatim via `#[path]` so the exact
 //! shipping code is unit-tested on the host.
 
+extern crate alloc;
+
 #[path = "../../../crates/gc-std/src/gctypes.rs"]
 pub mod gctypes;
 
@@ -46,6 +48,14 @@ pub mod hw {
 #[path = "../../../crates/gc-std/src/card.rs"]
 #[allow(dead_code)]
 pub mod card;
+
+#[path = "../../../crates/gc-std/src/sd.rs"]
+#[allow(dead_code)]
+pub mod sd;
+
+#[path = "../../../crates/gc-std/src/fat.rs"]
+#[allow(dead_code)]
+pub mod fat;
 
 #[cfg(test)]
 mod tests {
@@ -578,5 +588,269 @@ mod heap_tests {
             let whole = heap::alloc_raw(ARENA, 32);
             assert_eq!(whole, t.base());
         }
+    }
+}
+
+#[cfg(test)]
+mod sd_tests {
+    //! Emulated SDHC card at the *SPI byte level* driving the real sd.rs
+    //! command state machine, with a hand-built FAT32 image on it.
+    #![allow(non_snake_case)]
+
+    use crate::fat;
+    use crate::sd::{self, SdSpi};
+    use std::vec::Vec;
+
+    const IMG_BLOCKS: u32 = 66600; // 512-byte sectors → FAT32-classified
+
+    struct MockSd {
+        image: Vec<u8>,
+        /// response bytes queued for the host to read
+        rx: std::collections::VecDeque<u8>,
+        /// in-progress command frame (first byte !0xFF..0x40|idx)
+        cmd: Vec<u8>,
+        /// set after CMD24: where the next data frame goes
+        pending_write: Option<u32>,
+        acmd41_pokes: u32,
+    }
+
+    impl MockSd {
+        fn new() -> MockSd {
+            MockSd {
+                image: vec![0u8; (IMG_BLOCKS * 512) as usize],
+                rx: Default::default(),
+                cmd: Vec::new(),
+                pending_write: None,
+                acmd41_pokes: 0,
+            }
+        }
+
+        fn crc16(data: &[u8]) -> u16 {
+            let mut crc = 0u16;
+            for &b in data {
+                crc ^= (b as u16) << 8;
+                for _ in 0..8 {
+                    crc = if crc & 0x8000 != 0 { (crc << 1) ^ 0x1021 } else { crc << 1 };
+                }
+            }
+            crc
+        }
+
+        fn handle_command(&mut self) {
+            let idx = self.cmd[0] & 0x3f;
+            let arg = u32::from_be_bytes([self.cmd[1], self.cmd[2], self.cmd[3], self.cmd[4]]);
+            self.cmd.clear();
+            match idx {
+                0 => self.rx.push_back(0x01),
+                8 => {
+                    if arg == 0x1AA {
+                        self.rx.extend([0x01, 0x00, 0x00, 0x01, 0xAA]);
+                    } else {
+                        self.rx.push_back(0x05);
+                    }
+                }
+                55 => self.rx.push_back(0x01),
+                41 => {
+                    self.acmd41_pokes += 1;
+                    self.rx.push_back(if self.acmd41_pokes < 2 { 0x01 } else { 0x00 });
+                }
+                58 => self.rx.extend([0x00, 0xC0, 0xFF, 0x80, 0x00]), // R3, CCS=1
+                16 => self.rx.push_back(0x00),
+                12 => self.rx.push_back(0x00),
+                17 => {
+                    let off = (arg as usize) * 512;
+                    self.rx.push_back(0x00); // r1 ok
+                    self.rx.push_back(0xFF); // one wait cycle
+                    self.rx.push_back(0xFE); // data token
+                    self.rx.extend(self.image[off..off + 512].iter().copied());
+                    self.rx.extend(Self::crc16(&self.image[off..off + 512]).to_be_bytes());
+                }
+                24 => {
+                    self.rx.push_back(0x00); // r1 ok
+                    self.pending_write = Some(arg); // SDHC: block-addressed
+                }
+                _ => self.rx.push_back(0x04), // illegal command
+            }
+        }
+
+        fn feed_byte(&mut self, b: u8) {
+            if let Some(_lba) = self.pending_write {
+                // frame handled in write_bytes (full 516-byte call)
+            }
+            if self.cmd.is_empty() && b == 0xFF {
+                return; // idle filler / dummy clocks
+            }
+            self.cmd.push(b);
+            if self.cmd.len() == 6 {
+                self.handle_command();
+            }
+        }
+    }
+
+    impl SdSpi for MockSd {
+        fn idle_clocks(&mut self, _n: usize) -> Result<(), i32> {
+            Ok(())
+        }
+        fn select(&mut self, _fast: bool) -> Result<(), i32> {
+            self.cmd.clear();
+            Ok(())
+        }
+        fn deselect(&mut self) -> Result<(), i32> {
+            Ok(())
+        }
+        fn transfer(&mut self, byte: u8) -> Result<u8, i32> {
+            if let Some(b) = self.rx.pop_front() {
+                Ok(b)
+            } else {
+                self.feed_byte(byte);
+                Ok(0xFF)
+            }
+        }
+        fn write_bytes(&mut self, data: &[u8]) -> Result<(), i32> {
+            // either command bytes or (after CMD24) a full 516-byte frame
+            if let Some(lba) = self.pending_write {
+                if data.len() >= 513 && data[0] == 0xFE {
+                    let off = (lba as usize) * 512;
+                    self.image[off..off + 512].copy_from_slice(&data[1..513]);
+                    let want = u16::from_be_bytes([data[513], data[514]]);
+                    let got = Self::crc16(&data[1..513]);
+                    if want != got {
+                        self.rx.push_back(0x0B); // crc error token
+                    } else {
+                        self.rx.push_back(0x05); // accepted
+                    }
+                    self.rx.push_back(0x00); // busy
+                    self.rx.push_back(0xFF); // program done
+                    self.pending_write = None;
+                    return Ok(());
+                }
+            }
+            for &b in data {
+                self.feed_byte(b);
+            }
+            Ok(())
+        }
+        fn read_bytes(&mut self, buf: &mut [u8]) -> Result<(), i32> {
+            for b in buf.iter_mut() {
+                *b = self.rx.pop_front().unwrap_or(0xFF);
+            }
+            Ok(())
+        }
+    }
+
+    /// Build a valid FAT32 image with one file: HELLO.TXT = "hi gc-rust
+    /// filesystem!!" (23 bytes, clusters 3..4 chained).
+    fn fat32_image() -> Vec<u8> {
+        let mut img = vec![0u8; (IMG_BLOCKS * 512) as usize];
+        {
+            let b = &mut img[0..512];
+            b[0..3].copy_from_slice(&[0xEB, 0x58, 0x90]);
+            b[3..11].copy_from_slice(b"MSDOS5.0");
+            b[11..13].copy_from_slice(&512u16.to_le_bytes());
+            b[13] = 1; // sectors/cluster
+            b[14..16].copy_from_slice(&32u16.to_le_bytes()); // reserved
+            b[16] = 2; // fats
+            let fatsz = 513u32;
+            b[32..36].copy_from_slice(&IMG_BLOCKS.to_le_bytes());
+            b[36..40].copy_from_slice(&fatsz.to_le_bytes());
+            b[44..48].copy_from_slice(&2u32.to_le_bytes()); // root cluster
+            b[510] = 0x55;
+            b[511] = 0xAA;
+        }
+        for fat in [32u32, 545u32] {
+            let base = (fat * 512) as usize;
+            let mut set = |cluster: u32, val: u32| {
+                let o = base + cluster as usize * 4;
+                img[o..o + 4].copy_from_slice(&(val | 0xF000_0000).to_le_bytes());
+            };
+            set(0, 0x0FFFF_0F0);
+            set(1, 0x0FFF_FFFF);
+            set(2, 0x0FFF_FFFF); // root EOC
+            set(3, 4); // HELLO.TXT: 3→4
+            set(4, 0x0FFF_FFFF);
+        }
+        // root dir at cluster 2 → lba 1058 (data start = 32+2*513)
+        let root_lba = 1058usize * 512;
+        let mut de = [0u8; 32];
+        de[0..11].copy_from_slice(b"HELLO   TXT");
+        de[11] = 0x20;
+        let first_cluster = 3u32;
+        de[20..22].copy_from_slice(&((first_cluster >> 16) as u16).to_le_bytes());
+        de[26..28].copy_from_slice(&(first_cluster as u16).to_le_bytes());
+        de[28..32].copy_from_slice(&23u32.to_le_bytes()); // size
+        img[root_lba..root_lba + 32].copy_from_slice(&de);
+        // file payload in cluster 3 → lba 1059
+        img[1059 * 512..1059 * 512 + 23].copy_from_slice(b"hi gc-rust filesystem!!");
+        img
+    }
+
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct Fixture {
+        _g: std::sync::MutexGuard<'static, ()>,
+        mock: &'static mut MockSd,
+    }
+
+    impl Fixture {
+        fn new() -> Fixture {
+            let g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let m: &'static mut MockSd = Box::leak(Box::new(MockSd::new()));
+            m.image = fat32_image();
+            Fixture { _g: g, mock: m }
+        }
+    }
+
+    #[test]
+    fn sd_spi_handshake_and_read() {
+        let mut fx = Fixture::new();
+        let mut drv = sd::init(fx.mock).expect("sd init");
+        let mut block = [0u8; 512];
+        assert_eq!(sd::read_block(&mut drv, 1059, &mut block), sd::SD_ERROR_READY);
+        assert_eq!(&block[..23], b"hi gc-rust filesystem!!");
+    }
+
+    #[test]
+    fn sd_write_block_roundtrip() {
+        let mut fx = Fixture::new();
+        let mut drv = sd::init(fx.mock).expect("sd init");
+        let mut block = [0u8; 512];
+        for i in 0..512 {
+            block[i] = (i * 13 & 0xff) as u8;
+        }
+        assert_eq!(sd::write_block(&mut drv, 3000, &block), sd::SD_ERROR_READY);
+        let mut back = [0u8; 512];
+        assert_eq!(sd::read_block(&mut drv, 3000, &mut back), sd::SD_ERROR_READY);
+        assert_eq!(back, block);
+    }
+
+    struct SdBlockIo<'a> {
+        sd: &'a mut sd::Sd,
+    }
+    impl fat::BlockIo for SdBlockIo<'_> {
+        fn read_block(&mut self, lba: u32, buf: &mut [u8; 512]) -> i32 {
+            sd::read_block(self.sd, lba, buf)
+        }
+    }
+
+    #[test]
+    fn fat32_mount_list_read() {
+        let mut fx = Fixture::new();
+        let mut drv = sd::init(fx.mock).expect("sd init");
+        let mut io = SdBlockIo { sd: &mut drv };
+        let mut fs = fat::Fat::mount(&mut io).expect("mount");
+        let entries = fs.list().expect("list");
+        assert_eq!(entries.len(), 1);
+        let name = {
+            let n = entries.get(0).unwrap();
+            let nm = n.name_str();
+            let end = nm.iter().position(|&c| c == 0).unwrap_or(12);
+            String::from_utf8_lossy(&nm[..end]).into_owned()
+        };
+        assert_eq!(name, "HELLO.TXT");
+        let mut buf = vec![0u8; 64];
+        let n = fs.read_file("hello.txt", &mut buf).expect("read_file");
+        assert_eq!(n as usize, 23);
+        assert_eq!(&buf[..n as usize], b"hi gc-rust filesystem!!");
+        assert!(fs.read_file("missing.bin", &mut buf).is_err());
     }
 }

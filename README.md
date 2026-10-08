@@ -29,6 +29,7 @@ Nothing else. No devkitPro, no gcc, no libogc, no elf2dol.
 * Controller (SI) driver: buttons, held state, analog sticks, analog triggers, origin calibration (cmd `0x41`), hot-plug detect.
 * **Memory cards** (`card`): the `CARD_*` save-game filesystem (mount/verify/create/read/write/delete/dir-walk), ported 1:1 from libogc, exercised host-side against a card-image emulator.
 * **EXI bus** (`exi`) with libogc-shaped sync API, plus USB Gecko debug output and system SRAM settings access (`sram`).
+* **SD Gecko** (`sd`): SD/SDHC block reads & writes over SPI; **`fat`** gives a read-only FAT16/FAT32 layer (list dir, read files) for media-grade storage.
 * `gu` matrix math (perspective, look-at, concat, rotation…) in pure Rust.
 * Font-based text console on the framebuffer (`print!`/`println!`).
 * **Framebuffer double-buffering** — a two-slot VI flip chain (`video.flip()`; the GX `end_frame()` flips automatically).
@@ -83,6 +84,7 @@ On hardware: copy the `.dol` onto an SD card and load it with Swiss (or any othe
 | 15 | `exi-sram`           | EXI bus driver + system SRAM/settings readout          |
 | 16 | `memcard`            | Save files on a real GC memory card (CARD driver, host-tested) |
 | 17 | `usb-gecko`          | USB Gecko debug-channel output (host over TCP under Dolphin) |
+| 18 | `sd-file`            | SD Gecko: FAT32 mount, dir listing, file read                |
 
 Every resulting `.dol` contains Rust + hardware glue only. No C, no assembly libraries, zero non-Rust code.
 

@@ -28,7 +28,8 @@ EXAMPLES := \
 	dsp-mixer \
 	exi-sram \
 	memcard \
-	usb-gecko
+	usb-gecko \
+	sd-file
 
 DOLS := $(addprefix dist/,$(addsuffix .dol,$(EXAMPLES)))
 
