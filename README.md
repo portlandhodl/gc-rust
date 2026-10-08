@@ -21,9 +21,10 @@ Nothing else. No devkitPro, no gcc, no libogc, no elf2dol.
 
 * `core` + `alloc` via `-Zbuild-std` — `Vec`, `String`, `Box`, `format!`, `BTreeMap`… all work on the console.
 * HV bring-up in Rust (`crt0.rs`): BATs, caches, FPU + paired-singles, stack, bss zeroing.
-* Video (VI) driver: NTSC/PAL IntDf 640×480/576, YUY2 4:2:2 XFB, retrace polling.
+* **Interrupts & exceptions**: PI interrupt controller, exception vector trampolines, per-source handlers, `irq::IrqLock` critical sections.
+* Video (VI) driver: NTSC/PAL/MPAL/EURGB60, 480i IntDf and 480p progressive, YUY2 4:2:2 XFB, retrace polling.
 * **GX** driver: viewport/scissor, immediate-mode vertex streams through the write-gather pipe, projection/model matrix loads, TEV setup, depth buffer, EFB→XFB copy.
-* SI (controller) driver: buttons, held state, analog sticks, analog triggers.
+* Controller (SI) driver: buttons, held state, analog sticks, analog triggers, origin calibration (cmd `0x41`), hot-plug detect.
 * `gu` matrix math (perspective, look-at, concat, rotation…) in pure Rust.
 * Font-based text console on the framebuffer (`print!`/`println!`).
 * A free-list heap allocator on MEM1.
@@ -69,6 +70,8 @@ On hardware: copy the `.dol` onto an SD card and load it with Swiss (or any othe
 | 08 | `gx-cube`           | Depth-tested colored cube                                |
 | 09 | `gx-textured-cube`  | Procedural RGB565 texture + 4×4 swizzle + clamping       |
 | 10 | `gx-lit-cube`       | Per-vertex lit cube (normals × light dir)                |
+| 11 | `irq-timer`         | VI retrace via PI interrupt handler (no polling)        |
+| 12 | `pad-calibrated`    | Pad origin calibration + hot-plug detect                |
 
 Every resulting `.dol` contains Rust + hardware glue only. No C, no assembly libraries, zero non-Rust code.
 
@@ -99,8 +102,9 @@ Your crate's name must match its directory name base (`examples/NN-mycoolgame` �
 | `powerpc-gekko-none-eabi.json` | custom rustc target: big-endian, +FPU (`750`), static reloc model, panic=abort, `rust-lld` linker driver |
 | `crates/gc-std/src/crt0.rs` | `_start`: real-mode BAT/HID0/L2/FPSCR setup then MMU back on; clear `.bss`; call `main()` |
 | `crates/gc-std/src/hw.rs` | MMIO read/write + write-gather pipe helpers, YAGCD register addresses |
-| `crates/gc-std/src/video.rs` | VI driver: timing tables (NTSC/PAL), framebuffer setup, vsync |
-| `crates/gc-std/src/input.rs` | SI command `0x4003` polling loop, per-frame scan (port of libogc's pad protocol) |
+| `crates/gc-std/src/video.rs` | VI driver: timing tables (NTSC/PAL/MPAL/EURGB60 + 480p), framebuffer setup, vsync |
+| `crates/gc-std/src/irq.rs` | PI interrupt controller, exception trampolines, per-source handlers |
+| `crates/gc-std/src/input.rs` | SI `0x4003` polling with origin calibration + hot-plug detect |
 | `crates/gc-std/src/gx.rs` | GX register shadowing + BP/CP/XF command writers + pipeline helpers |
 | `crates/gc-std/src/gu.rs` | All matrix math in pure Rust (Cephes-style scalar libm included) |
 | `tools/gc-dol` | host-side ELF→DOL packer in pure Rust |
