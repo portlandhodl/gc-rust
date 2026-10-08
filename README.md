@@ -32,6 +32,7 @@ Nothing else. No devkitPro, no gcc, no libogc, no elf2dol.
 * **EXI bus** (`exi`) with libogc-shaped sync API, plus USB Gecko debug output and system SRAM settings access (`sram`).
 * **SD Gecko** (`sd`): SD/SDHC block reads & writes over SPI; **`fat`** gives a read-only FAT16/FAT32 layer (list dir, read files) for media-grade storage.
 * **ADPCM decode** (`adpcm`): GC DSP-ADPCM → PCM s16 for stock audio assets, usable with `aesnd` voices.
+* **BBA networking** (`bba` + `net`): the Ethernet MAC driver plus a purpose-built mini IP stack (ARP, ICMP ping, UDP) for background "agent" threads.
 * `gu` matrix math (perspective, look-at, concat, rotation…) in pure Rust.
 * Font-based text console on the framebuffer (`print!`/`println!`).
 * **Framebuffer double-buffering** — a two-slot VI flip chain (`video.flip()`; the GX `end_frame()` flips automatically).
@@ -96,6 +97,8 @@ On hardware: copy the `.dol` onto an SD card and load it with Swiss (or any othe
 | 18 | `sd-file`            | SD Gecko: FAT32 mount, dir listing, file read                |
 | 19 | `dvd-read`           | DI drive reads; boots as a full bootable ISO (`make iso`)    |
 | 20 | `threads`            | Preemptive LWP: background agent with sleeps + foreground loop |
+| 21 | `thread-sync`        | LWP Channel/Mutex/WaitQueue: game pushes jobs onto a parked agent |
+| 22 | `net-echo`           | BBA ethernet: probe, bring-up, ARP gateway, ICMP ping          |
 
 Every resulting `.dol` contains Rust + hardware glue only. No C, no assembly libraries, zero non-Rust code.
 

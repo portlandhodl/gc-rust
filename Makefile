@@ -14,6 +14,8 @@ PROFILE      := release
 EXAMPLES := \
 	dvd-read \
 	threads \
+	thread-sync \
+	net-echo \
 	hello-console \
 	pad-input \
 	heap-strings \

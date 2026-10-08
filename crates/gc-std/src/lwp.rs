@@ -34,6 +34,8 @@ pub enum State {
     Runnable = 0,
     Sleeping = 1,
     Done = 2,
+    /// Parked on a wait queue.
+    Blocked = 3,
 }
 
 /// A fully-preemptive context frame.
@@ -49,6 +51,8 @@ pub struct Tcb {
     state: State,
     wake_tick: u64,
     done_ret: u32,
+    /// Section of `lwp_sync` wait-queue tokens the thread is parked on.
+    wait_token: u32,
 }
 
 static mut TCBS: [Option<*mut Tcb>; MAX_THREADS] = [None; MAX_THREADS];
@@ -161,7 +165,7 @@ static INITED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::
 
 impl Tcb {
     fn zeroed() -> Tcb {
-        Tcb { frame: Frame { bytes: [0; 0x2c0] }, state: State::Runnable, wake_tick: 0, done_ret: 0 }
+        Tcb { frame: Frame { bytes: [0; 0x2c0] }, state: State::Runnable, wake_tick: 0, done_ret: 0, wait_token: 0 }
     }
 }
 
@@ -208,6 +212,37 @@ pub fn spawn(entry: extern "C" fn(u32) -> usize, arg: u32, stack_size: usize) ->
         COUNT += 1;
         Ok(Thread { idx: slot })
     }
+}
+
+/// Park the calling thread until `wake_token(token)` runs somewhere.
+/// (sched only)
+pub(crate) fn block_current(token: u32) {
+    unsafe {
+        let cur = (&raw const CURRENT).read_volatile();
+        if let Some(t) = tcbs()[cur] {
+            (*t).state = State::Blocked;
+            (*t).wait_token = token;
+        }
+    }
+    yield_now();
+}
+
+/// Wake all threads parked on `token`.
+pub(crate) fn wake_token(token: u32) {
+    unsafe {
+        for s in tcbs_mut().iter_mut() {
+            if let Some(t) = *s {
+                if (*t).state == State::Blocked && (*t).wait_token == token {
+                    (*t).state = State::Runnable;
+                }
+            }
+        }
+    }
+}
+
+/// Index of the currently-running thread (0 = main).
+pub(crate) fn current_id() -> u32 {
+    unsafe { (&raw const CURRENT).read_volatile() as u32 }
 }
 
 /// Yield = hand the rest of this timeslice to another thread.

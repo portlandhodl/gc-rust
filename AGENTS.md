@@ -26,6 +26,11 @@ via the in-tree `tools/gc-dol` host tool.
   - `lwp.rs` — preemptive single-core threads: DEC vector (0x0900) handler
     with full PPCState save/restore per TCB; round-robin every 4 ms;
     `spawn`/`sleep_ms`/`yield_now`/`join`/exit.
+  - `lwp_sync.rs` — wait-queues, sleeping Mutex, bounded Channel.
+  - `bba.rs` — BBA Ethernet MAC on EXI ch0/dev2 (libogc bba.c port;
+    TX FIFO + RX page ring, 32 MHz frames).
+  - `net.rs` — slimmest possible homebrew stack: ethernet frames, ARP
+    reply/resolve, ICMP echo, UDP with checksums.
   - `gx.rs` — GX driver: pipe reg writers, immediate mode, TEV, dirty-state
     flush (port of libogc `gx.c`).
   - `gu.rs` — matrix math (pure Rust; Cephes-style sin/cos/sqrt inside).
@@ -75,7 +80,7 @@ via the in-tree `tools/gc-dol` host tool.
 - `make <pkg>` — one example (names: hello-console, pad-input, heap-strings,
   video-info, pixel-plasma, gx-clear, gx-triangle, gx-cube, gx-textured-cube,
   gx-lit-cube, irq-timer, pad-calibrated, audio-beep, dsp-mixer, exi-sram,
-  memcard, usb-gecko, sd-file, dvd-read, threads).
+  memcard, usb-gecko, sd-file, dvd-read, threads, thread-sync, net-echo).
 - `make iso EXAMPLE=dvd-read` — build a bootable GCM (gc-iso + apploader).
 - `tests/dvd-iso-e2e.sh` — boots the ISO in Dolphin + watches the
   observation mailbox via MemoryWatcher (needs a Dolphin build with

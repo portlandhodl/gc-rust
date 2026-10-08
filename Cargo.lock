@@ -98,6 +98,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "net-echo"
+version = "0.1.0"
+dependencies = [
+ "gc-std",
+]
+
+[[package]]
 name = "pad-calibrated"
 version = "0.1.0"
 dependencies = [
@@ -120,6 +127,13 @@ dependencies = [
 
 [[package]]
 name = "sd-file"
+version = "0.1.0"
+dependencies = [
+ "gc-std",
+]
+
+[[package]]
+name = "thread-sync"
 version = "0.1.0"
 dependencies = [
  "gc-std",

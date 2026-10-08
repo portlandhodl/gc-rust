@@ -1,0 +1,8 @@
+[package]
+name = "net-echo"
+version = "0.1.0"
+edition = "2021"
+description = "gc-rust example: BBA ethernet + ARP + ICMP ping over the netdev"
+
+[dependencies]
+gc-std = { path = "../../crates/gc-std" }
