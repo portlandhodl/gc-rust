@@ -35,6 +35,14 @@ via the in-tree `tools/gc-dol` host tool.
     runs the real state machine against it.
   - `usbgecko.rs` — USB Gecko debug channel (host-visible over TCP 55020
     under Dolphin's Gecko emulation).
+  - `dvd.rs` — DI drive (read disk ID, inquiry, raw sector reads, stop
+    motor; sync port of libogc `DVD_Low*` register dances).
+  - `observe.rs` — observability mailbox at 0x80001C00 for host-side
+    verification via Dolphin MemoryWatcher (compile-in tests) / debuggers.
+- `crates/apploader/` — minimal Rust GC ISO apploader (three-callback
+  contract; patched section table on pack).
+- `tools/gc-iso/` — host tool producing bootable GCM/ISO images from a DOL
+  (+ extra files at fixed LBAs).
   - `adpcm.rs` — Nintendo DSP-ADPCM → s16 mono decode (canonical math; 8
     predictor-pair coeff table from the asset header).
   - `sd.rs` — SD/SDHC block IO over SD Gecko (SPI mode, CMD0/8/16/17/24/41/
@@ -64,7 +72,11 @@ via the in-tree `tools/gc-dol` host tool.
 - `make <pkg>` — one example (names: hello-console, pad-input, heap-strings,
   video-info, pixel-plasma, gx-clear, gx-triangle, gx-cube, gx-textured-cube,
   gx-lit-cube, irq-timer, pad-calibrated, audio-beep, dsp-mixer, exi-sram,
-  memcard, usb-gecko, sd-file).
+  memcard, usb-gecko, sd-file, dvd-read).
+- `make iso EXAMPLE=dvd-read` — build a bootable GCM (gc-iso + apploader).
+- `tests/dvd-iso-e2e.sh` — boots the ISO in Dolphin + watches the
+  observation mailbox via MemoryWatcher (needs a Dolphin build with
+  USE_MEMORYWATCHER compiled in; the headless flatpak here has it off).
 - `tests/memcard-persist.sh` / `tests/usbgecko-e2e.sh` — manual E2E tests
   (need desktop Dolphin; not wired into `make check`).
 - `make run EXAMPLE=<pkg>` — Dolphin.

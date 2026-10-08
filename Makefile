@@ -12,6 +12,7 @@ TARGET_TRIPLE := powerpc-gekko-none-eabi
 PROFILE      := release
 
 EXAMPLES := \
+	dvd-read \
 	hello-console \
 	pad-input \
 	heap-strings \
@@ -82,3 +83,29 @@ clean:
 
 run: dist/$(EXAMPLE).dol
 	dolphin-emu --batch --exec=$<
+
+
+# ISO packaging path: builds the apploader payload + packs a bootable GCM.
+APPLOADER_ELF := crates/apploader/target/powerpc-gekko-none-eabi/release/gc-apploader
+GC_ISO := tools/gc-iso/target/x86_64-unknown-linux-gnu/release/gc-iso
+
+.PHONY: iso run-iso
+
+# `make iso EXAMPLE=dvd-read` — emit dist/<example>.iso (bootable GCM)
+DVD_README := examples/19-dvd-read/readme.txt
+iso: $(APPLOADER_ELF) $(GC_ISO) dist/$(EXAMPLE).dol
+	$(GC_ISO) \
+	    --apploader $(APPLOADER_ELF) \
+	    --dol dist/$(EXAMPLE).dol \
+	    --file 0x100000:$(DVD_README) \
+	    --name "$(EXAMPLE) (gc-rust ISO demo)" \
+	    -o dist/$(EXAMPLE).iso
+
+$(APPLOADER_ELF): crates/apploader/src/main.rs
+	cd crates/apploader && RUSTFLAGS='-C link-arg=-T -C link-arg=$(abspath crates/apploader/link-apploader.ld)' cargo build --release --target ../../powerpc-gekko-none-eabi.json -Z build-std=core
+
+$(GC_ISO): tools/gc-iso/src/main.rs
+	cd tools/gc-iso && cargo build --release
+
+run-iso: dist/$(EXAMPLE).iso
+	dolphin-emu --batch --exec=dist/$(EXAMPLE).iso

@@ -86,6 +86,7 @@ On hardware: copy the `.dol` onto an SD card and load it with Swiss (or any othe
 | 16 | `memcard`            | Save files on a real GC memory card (CARD driver, host-tested) |
 | 17 | `usb-gecko`          | USB Gecko debug-channel output (host over TCP under Dolphin) |
 | 18 | `sd-file`            | SD Gecko: FAT32 mount, dir listing, file read                |
+| 19 | `dvd-read`           | DI drive reads; boots as a full bootable ISO (`make iso`)    |
 
 Every resulting `.dol` contains Rust + hardware glue only. No C, no assembly libraries, zero non-Rust code.
 
@@ -118,6 +119,18 @@ Your crate's name must match its directory name base (`examples/NN-mycoolgame` â
 | `crates/gc-std/src/hw.rs` | MMIO read/write + write-gather pipe helpers, YAGCD register addresses |
 | `crates/gc-std/src/video.rs` | VI driver: timing tables (NTSC/PAL/MPAL/EURGB60 + 480p), framebuffer setup, vsync, flip chain |
 | `crates/gc-std/src/aesnd.rs` | DSP-mixer voices: PB structs, `0xface*` mail protocol, AI DMA pacing (libaesnd port) |
+| `crates/gc-std/src/dvd.rs` | DI drive: disc ID, inquiry, raw reads (libogc `DVD_Low*` port) |
+| `tools/gc-iso` | Bootable GCM packer (+ a tiny Rust apploader payload in `crates/apploader`) |
+
+## Bootable ISOs
+
+`make iso EXAMPLE=dvd-read` produces `dist/dvd-read.iso`: a valid GCM
+image with boot.bin + bi2 + FST + our own Rust apploader. It boots in
+Dolphin and on real hardware (Swiss / datel loaders). Any extra files
+packed (see `Makefile` `--file` entries) sit at fixed LBAs; `dvd-read`
+shows reading them back with the pure-Rust DI (`dv`), then proves the
+roundtrip to testers via the observation mailbox (`observe.rs` +
+MemoryWatcher).
 | `crates/gc-std/src/irq.rs` | PI interrupt controller, exception trampolines, per-source handlers |
 | `crates/gc-std/src/input.rs` | SI `0x4003` polling with origin calibration + hot-plug detect |
 | `crates/gc-std/src/gx.rs` | GX register shadowing + BP/CP/XF command writers + pipeline helpers |

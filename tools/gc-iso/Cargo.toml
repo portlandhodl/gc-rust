@@ -1,0 +1,10 @@
+[workspace]
+
+[package]
+name = "gc-iso"
+version = "0.1.0"
+edition = "2021"
+description = "pack a gc-rust DOL + Rust apploader + extra files into a bootable GameCube GCM/ISO"
+
+[dependencies]
+gc-dol = { path = "../gc-dol" }

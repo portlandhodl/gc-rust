@@ -1,0 +1,17 @@
+[profile.release]
+opt-level = "s"
+lto = true
+panic = "abort"
+
+[package]
+name = "gc-apploader"
+version = "0.1.0"
+edition = "2021"
+description = "Rust ISO apploader payload (runs in Dolphin's BS2 HLE boot path)"
+
+[[bin]]
+name = "gc-apploader"
+
+[dependencies]
+
+[workspace]
