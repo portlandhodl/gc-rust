@@ -6,3 +6,4 @@ members = ["crates/gc-std", "examples/*"]
 opt-level = "s"
 debug = true
 overflow-checks = false
+

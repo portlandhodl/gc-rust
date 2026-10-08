@@ -49,6 +49,7 @@ mod heap;
 pub mod hw;
 pub mod input;
 pub mod irq;
+pub mod lwp;
 pub mod observe;
 pub mod sd;
 pub mod sram;

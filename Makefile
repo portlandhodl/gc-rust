@@ -13,6 +13,7 @@ PROFILE      := release
 
 EXAMPLES := \
 	dvd-read \
+	threads \
 	hello-console \
 	pad-input \
 	heap-strings \

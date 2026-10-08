@@ -27,6 +27,7 @@ Nothing else. No devkitPro, no gcc, no libogc, no elf2dol.
 * **Polyphonic audio** (`aesnd`): up to 32 voices mixed on the console's DSP by the libaesnd-compatible mixer microcode (`dspcode.rs`), staged through ARAM, with per-voice volume/pitch/loop and stream-refill callbacks.
 * **Audio** (simple path): stereo 16-bit PCM @ 48 kHz straight through the AI DMA engine (interrupt-driven buffer refill, `audio::on_refill` callback) — for when you just need a beep.
 * Controller (SI) driver: buttons, held state, analog sticks, analog triggers, origin calibration (cmd `0x41`), hot-plug detect.
+* **Preemptive threads** (`lwp`): background agents with `sleep_ms` / `yield_now` / `join` — one Gekko core, sliced by the decrementer.
 * **Memory cards** (`card`): the `CARD_*` save-game filesystem (mount/verify/create/read/write/delete/dir-walk), ported 1:1 from libogc, exercised host-side against a card-image emulator.
 * **EXI bus** (`exi`) with libogc-shaped sync API, plus USB Gecko debug output and system SRAM settings access (`sram`).
 * **SD Gecko** (`sd`): SD/SDHC block reads & writes over SPI; **`fat`** gives a read-only FAT16/FAT32 layer (list dir, read files) for media-grade storage.
@@ -87,6 +88,7 @@ On hardware: copy the `.dol` onto an SD card and load it with Swiss (or any othe
 | 17 | `usb-gecko`          | USB Gecko debug-channel output (host over TCP under Dolphin) |
 | 18 | `sd-file`            | SD Gecko: FAT32 mount, dir listing, file read                |
 | 19 | `dvd-read`           | DI drive reads; boots as a full bootable ISO (`make iso`)    |
+| 20 | `threads`            | Preemptive LWP: background agent with sleeps + foreground loop |
 
 Every resulting `.dol` contains Rust + hardware glue only. No C, no assembly libraries, zero non-Rust code.
 
@@ -120,6 +122,7 @@ Your crate's name must match its directory name base (`examples/NN-mycoolgame` �
 | `crates/gc-std/src/video.rs` | VI driver: timing tables (NTSC/PAL/MPAL/EURGB60 + 480p), framebuffer setup, vsync, flip chain |
 | `crates/gc-std/src/aesnd.rs` | DSP-mixer voices: PB structs, `0xface*` mail protocol, AI DMA pacing (libaesnd port) |
 | `crates/gc-std/src/dvd.rs` | DI drive: disc ID, inquiry, raw reads (libogc `DVD_Low*` port) |
+| `crates/gc-std/src/lwp.rs` | Threading: DEC-vector preemption, full PPCContext per TCB (spawn/sleep/yield/join) |
 | `tools/gc-iso` | Bootable GCM packer (+ a tiny Rust apploader payload in `crates/apploader`) |
 
 ## Bootable ISOs

@@ -216,7 +216,10 @@ extern "C" {
 pub(crate) fn init() {
     unsafe {
         install_vector(0x0500, __gc_irq_entry as *const () as u32);
-        install_vector(0x0900, __gc_irq_entry as *const () as u32);
+        install_vector(
+            0x0900,
+            crate::lwp::__lwp_dec_entry as *const () as u32,
+        );
         hw::dc_flush_range((hw::MEM_BASE_CACHED + 0x0500) as *mut u32, 0x20);
         hw::dc_flush_range((hw::MEM_BASE_CACHED + 0x0900) as *mut u32, 0x20);
     }

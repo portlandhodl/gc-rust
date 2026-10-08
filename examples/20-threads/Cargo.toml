@@ -1,0 +1,8 @@
+[package]
+name = "threads"
+version = "0.1.0"
+edition = "2021"
+description = "gc-rust example: preemptive LWP threading (background agent + foreground loop)"
+
+[dependencies]
+gc-std = { path = "../../crates/gc-std" }

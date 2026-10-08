@@ -23,6 +23,9 @@ via the in-tree `tools/gc-dol` host tool.
     and plug/unplug detect (port of libogc pad protocol).
   - `irq.rs` — PI interrupt controller + asm exception trampolines and a
     per-source dispatcher. VI retrace = one consumer; other sources welcome.
+  - `lwp.rs` — preemptive single-core threads: DEC vector (0x0900) handler
+    with full PPCState save/restore per TCB; round-robin every 4 ms;
+    `spawn`/`sleep_ms`/`yield_now`/`join`/exit.
   - `gx.rs` — GX driver: pipe reg writers, immediate mode, TEV, dirty-state
     flush (port of libogc `gx.c`).
   - `gu.rs` — matrix math (pure Rust; Cephes-style sin/cos/sqrt inside).
@@ -72,7 +75,7 @@ via the in-tree `tools/gc-dol` host tool.
 - `make <pkg>` — one example (names: hello-console, pad-input, heap-strings,
   video-info, pixel-plasma, gx-clear, gx-triangle, gx-cube, gx-textured-cube,
   gx-lit-cube, irq-timer, pad-calibrated, audio-beep, dsp-mixer, exi-sram,
-  memcard, usb-gecko, sd-file, dvd-read).
+  memcard, usb-gecko, sd-file, dvd-read, threads).
 - `make iso EXAMPLE=dvd-read` — build a bootable GCM (gc-iso + apploader).
 - `tests/dvd-iso-e2e.sh` — boots the ISO in Dolphin + watches the
   observation mailbox via MemoryWatcher (needs a Dolphin build with
