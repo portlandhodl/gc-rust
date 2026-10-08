@@ -23,7 +23,8 @@ EXAMPLES := \
 	gx-textured-cube \
 	gx-lit-cube \
 	irq-timer \
-	pad-calibrated
+	pad-calibrated \
+	audio-beep
 
 DOLS := $(addprefix dist/,$(addsuffix .dol,$(EXAMPLES)))
 

@@ -112,17 +112,18 @@ pub unsafe fn si_write(idx: u32, v: u32) {
     write32(SI_BASE + 4 * idx, v);
 }
 
-/// `_SHIFTL(v, shift, width)` from libogc's gctypes.h:
-/// insert `width` LSBs of `v` into a field starting at bit `shift`.
+/// `_SHIFTL(v, s, w)` exactly as libogc's gcutil.h: take the low `w` bits
+/// of `v` and place them at bit position `s` from the right (zero-based).
 #[inline(always)]
-pub const fn shiftl(v: u32, shift: u32, width: u32) -> u32 {
-    (v << (32 - shift - width)) & ((0x01u32 << (32 - shift)) - (0x01u32 << (32 - shift - width)))
+pub const fn shiftl(v: u32, s: u32, w: u32) -> u32 {
+    (v & ((1u32 << w) - 1)) << s
 }
 
-/// `_SHIFTR(v, shift, width)`: extract a field.
+/// `_SHIFTR(v, s, w)` exactly as libogc's gcutil.h: extract the field of
+/// `w` bits starting at bit `s` from the right.
 #[inline(always)]
-pub const fn shiftr(v: u32, shift: u32, width: u32) -> u32 {
-    (v >> (32 - shift - width)) & ((0x01u32 << width) - 1)
+pub const fn shiftr(v: u32, s: u32, width: u32) -> u32 {
+    (v >> s) & ((1u32 << width) - 1)
 }
 
 /// Flush (write back) a data-cache range so hardware DMA/GPU sees it.

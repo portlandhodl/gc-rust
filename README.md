@@ -24,10 +24,12 @@ Nothing else. No devkitPro, no gcc, no libogc, no elf2dol.
 * **Interrupts & exceptions**: PI interrupt controller, exception vector trampolines, per-source handlers, `irq::IrqLock` critical sections.
 * Video (VI) driver: NTSC/PAL/MPAL/EURGB60, 480i IntDf and 480p progressive, YUY2 4:2:2 XFB, retrace polling.
 * **GX** driver: viewport/scissor, immediate-mode vertex streams through the write-gather pipe, projection/model matrix loads, TEV setup, depth buffer, EFB→XFB copy.
+* **Audio**: stereo 16-bit PCM @ 48 kHz through the AI DMA engine (interrupt-driven buffer refill, `audio::on_refill` callback).
 * Controller (SI) driver: buttons, held state, analog sticks, analog triggers, origin calibration (cmd `0x41`), hot-plug detect.
 * `gu` matrix math (perspective, look-at, concat, rotation…) in pure Rust.
 * Font-based text console on the framebuffer (`print!`/`println!`).
 * A free-list heap allocator on MEM1.
+* ARAM streaming-block driver (sync DMA) if you want to study DMA into the DSP.
 
 ## Build
 
@@ -72,6 +74,7 @@ On hardware: copy the `.dol` onto an SD card and load it with Swiss (or any othe
 | 10 | `gx-lit-cube`       | Per-vertex lit cube (normals × light dir)                |
 | 11 | `irq-timer`         | VI retrace via PI interrupt handler (no polling)        |
 | 12 | `pad-calibrated`    | Pad origin calibration + hot-plug detect                |
+| 13 | `audio-beep`        | Stereo PCM out via AI DMA at 48 kHz, interrupt-refilled |
 
 Every resulting `.dol` contains Rust + hardware glue only. No C, no assembly libraries, zero non-Rust code.
 

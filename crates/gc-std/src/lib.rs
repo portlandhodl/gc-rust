@@ -31,7 +31,11 @@
 
 extern crate alloc;
 
+pub mod aram;
+pub mod audio;
 pub mod console;
+pub mod dsp;
+pub mod dspcode;
 pub mod gctypes;
 pub mod gu;
 pub mod gx;

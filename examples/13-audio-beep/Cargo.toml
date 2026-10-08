@@ -1,0 +1,8 @@
+[package]
+name = "audio-beep"
+version = "0.1.0"
+edition = "2021"
+description = "gc-rust example: streaming audio through the AI DMA"
+
+[dependencies]
+gc-std = { path = "../../crates/gc-std" }
