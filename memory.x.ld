@@ -57,12 +57,13 @@ SECTIONS
 
     . = ALIGN(32);
     __Arena1Lo = .;
-    /* the XFB framebuffer is statically reserved at __xfb_base (see
-       crates/gc-std/src/video.rs) so the heap ends below it and the test
+    /* the XFB framebuffers are statically reserved at __xfb_base (see
+       crates/gc-std/src/video.rs) so the heap ends below them and the test
        harness knows where rendered frames live on a real console / in
-       Dolphin. */
-    __Arena1Hi = 0x81734000;
-    __xfb_base = 0x81734000;
+       Dolphin. Space for TWO worst-case buffers (640x576x2 B each) so the
+       driver can offer a flip chain. */
+    __Arena1Hi = 0x81694000;
+    __xfb_base = 0x81694000;
     __stack = 0x817FEFF0;
 
     /DISCARD/ : {

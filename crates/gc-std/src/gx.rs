@@ -293,11 +293,12 @@ impl Context {
         flush();
     }
 
-    /// Copy the finished frame into the XFB and wait for the next
-    /// vertical retrace.
+    /// Copy the finished frame into the back XFB, then flip: the new frame
+    /// is displayed from the next vertical retrace onwards and the old
+    /// front buffer becomes the draw target of the next `end_frame`.
     pub fn end_frame(&self) {
         copy_disp();
-        crate::video::wait_vsync();
+        crate::video::flip_current();
     }
 }
 

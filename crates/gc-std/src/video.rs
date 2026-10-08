@@ -140,14 +140,33 @@ static TAPS: [u16; 26] = [
 #[derive(Copy, Clone)]
 pub struct Video {
     mode: GXRModeObj,
+    /// back (draw) buffer, uncached
     framebuffer: *mut core::ffi::c_void,
+    /// slot currently displayed (0/1); the draw buffer is `1 - front`.
+    front: u8,
+}
+
+/// Worst-case XFB slot size (640x576 YUY2) — the two flip-chain slots in
+/// the reserved region (`memory.x.ld`, `__xfb_base`) are spaced by this.
+const XFB_SLOT_BYTES: usize = 640 * 576 * 2;
+
+/// Uncached pointer to flip-chain slot `idx`.
+fn slot_ptr(idx: u8) -> *mut core::ffi::c_void {
+    extern "C" {
+        static __xfb_base: u32;
+    }
+    unsafe {
+        let base = &raw const __xfb_base as usize;
+        hw::cached_to_uncached((base + idx as usize * XFB_SLOT_BYTES) as *mut core::ffi::c_void)
+    }
 }
 
 impl Video {
     pub fn mode(&self) -> &GXRModeObj {
         &self.mode
     }
-    /// Uncached pointer to the external framebuffer (YUY2).
+    /// Uncached pointer to the *draw* (back) framebuffer (YUY2). When the
+    /// flip chain is never used this is also the displayed buffer.
     pub fn framebuffer(&self) -> *mut core::ffi::c_void {
         self.framebuffer
     }
@@ -161,6 +180,30 @@ impl Video {
     /// framebuffer programs (no console, no GX).
     pub fn show(&self) {
         set_black(false);
+    }
+
+    /// Flip the double buffer: wait for vertical retrace, then display the
+    /// buffer just drawn and return a handle whose draw buffer is the
+    /// previous front buffer. Programs that never call `flip()` stay single
+    /// buffered (draw buffer == displayed buffer), exactly as before.
+    pub fn flip(&self) -> Video {
+        flip_current();
+        unsafe { *core::ptr::addr_of!(CURRENT) }
+    }
+}
+
+/// Flip-core operating on the global CURRENT state (used by the GX copy
+/// path as well). Waits for vsync, points VI at the back buffer, swaps
+/// front/back bookkeeping.
+pub(crate) fn flip_current() {
+    let mode = unsafe { (*core::ptr::addr_of!(CURRENT)).mode };
+    wait_vsync_inner();
+    unsafe {
+        let cur = core::ptr::addr_of_mut!(CURRENT);
+        let next_front = 1 - (*cur).front;
+        program_frame_buffers(&mode, slot_ptr(next_front));
+        (*cur).front = next_front;
+        (*cur).framebuffer = slot_ptr(1 - next_front);
     }
 }
 
@@ -191,6 +234,7 @@ static mut CURRENT: Video = Video {
         vfilter: [8, 8, 10, 12, 10, 8, 8],
     },
     framebuffer: core::ptr::null_mut(),
+    front: 0,
 };
 
 /// Build a `GXRModeObj` matching libogc's IntDf/Prog modes for the given
@@ -268,21 +312,20 @@ pub(crate) fn init() -> Video {
             _ => Standard::Ntsc,
         };
         let mode = mode_for(standard, FrameMode::Interlaced);
-        // The XFB lives at a *fixed* cached address from the linker script;
-        // the heap ends just below it. This keeps the framebuffer at a
-        // known location for tests and Dual-homing GX copies.
-        extern "C" {
-            static __xfb_base: u32;
-        }
-        let fb_cached = &raw const __xfb_base as *mut u8;
+        // The XFBs live at a *fixed* cached address from the linker script;
+        // the heap ends just below them. Two slots of XFB_SLOT_BYTES each.
         let size = usize::from(mode.fbWidth) * usize::from(mode.xfbHeight) * 2;
-        let fb = hw::cached_to_uncached(fb_cached as *mut core::ffi::c_void);
-        core::ptr::write_bytes(fb, 0x10, size); // black (uncached view)
+        for slot in 0..2u8 {
+            let p = slot_ptr(slot) as *mut u8;
+            core::ptr::write_bytes(p, 0x10, size); // black (uncached view)
+        }
 
+        let fb = slot_ptr(0);
         configure(&mode, fb);
-        hw::dc_flush_range(fb, size);
+        hw::dc_flush_range(slot_ptr(0) as *mut u8, size);
+        hw::dc_flush_range(slot_ptr(1) as *mut u8, size);
 
-        CURRENT = Video { mode, framebuffer: fb };
+        CURRENT = Video { mode, framebuffer: fb, front: 0 };
         CURRENT
     }
 }
@@ -324,14 +367,16 @@ unsafe fn vi_reset_with(idx: u32) {
     vi_write(54, 0x0000);
 }
 
-/// Switch to a user-selected mode after init.
+/// Switch to a user-selected mode after init. The flip chain (if in use)
+/// is left intact; both slots are reprogrammed to the new timing.
 pub fn set_mode(v: &Video, standard: Standard, fm: FrameMode) -> Video {
     unsafe {
         let mode = mode_for(standard, fm);
-        let fb = v.framebuffer;
-        configure(&mode, fb);
+        let front = (*core::ptr::addr_of!(CURRENT)).front;
+        let front_fb = slot_ptr(front);
+        configure(&mode, front_fb);
         hw::sync();
-        let nv = Video { mode, framebuffer: fb };
+        let nv = Video { mode, framebuffer: slot_ptr(1 - front), front };
         *core::ptr::addr_of_mut!(CURRENT) = nv;
         nv
     }
@@ -415,24 +460,32 @@ fn configure(mode: &GXRModeObj, fb: *mut core::ffi::c_void) {
         vi_write(8, psbeven as u16);
         vi_write(9, prbeven as u16);
 
-        let wpl = (u32::from(mode.fbWidth) + 15) / 16;
-        let bytes_per_line = (wpl << 5) & 0x1fe0;
-        let tfbb = hw::virt_to_phys(fb);
-        let mut bfbb = tfbb;
-        if mode.xfbMode == 1 {
-            bfbb += bytes_per_line;
-        }
-        vi_write(14, (tfbb >> 16) as u16);
-        vi_write(15, (tfbb & 0xffff) as u16);
-        vi_write(18, (bfbb >> 16) as u16);
-        vi_write(19, (bfbb & 0xffff) as u16);
-
-        let std = if mode.xfbMode == 1 { wpl << 1 } else { wpl };
-        vi_write(36, ((wpl as u16) << 8) | std as u16);
+        program_frame_buffers(mode, fb);
 
         flush();
         set_black(false);
     }
+}
+
+/// Program the VI's framebuffer base-address registers (top/bottom field)
+/// plus the word-stride registers — `VIDEO_SetNextFramebuffer`-style part
+/// of `VIDEO_Configure`, also used standalone by the flip chain. VI latches
+/// these at the next field boundary.
+unsafe fn program_frame_buffers(mode: &GXRModeObj, fb: *mut core::ffi::c_void) {
+    let wpl = (u32::from(mode.fbWidth) + 15) / 16;
+    let bytes_per_line = (wpl << 5) & 0x1fe0;
+    let tfbb = hw::virt_to_phys(fb);
+    let mut bfbb = tfbb;
+    if mode.xfbMode == 1 {
+        bfbb += bytes_per_line;
+    }
+    vi_write(14, (tfbb >> 16) as u16);
+    vi_write(15, (tfbb & 0xffff) as u16);
+    vi_write(18, (bfbb >> 16) as u16);
+    vi_write(19, (bfbb & 0xffff) as u16);
+
+    let std = if mode.xfbMode == 1 { wpl << 1 } else { wpl };
+    vi_write(36, ((wpl as u16) << 8) | std as u16);
 }
 
 /// VIDEO_Flush.

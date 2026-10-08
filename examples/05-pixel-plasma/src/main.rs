@@ -5,6 +5,10 @@
 //! adjacent pixels as `[Y0][U][Y1][V]`. This example renders a classic
 //! plasma effect into it with a sine LUT + palette lookup (fixed point, no
 //! `libm`): one more thing you can only enjoy on bare metal.
+//!
+//! Rendering happens into the back buffer of the VI flip chain: each frame
+//! `video.flip()` (vsync + swap) publishes it, so the beam never samples a
+//! half-drawn frame.
 
 #![no_std]
 #![no_main]
@@ -75,7 +79,7 @@ extern "C" fn main() -> i32 {
     let mode = gc.video().mode();
     let width = mode.fbWidth as usize;
     let height = mode.xfbHeight as usize;
-    let xfb = gc.video().framebuffer().cast::<u32>();
+    let mut vid = *gc.video();
 
     let lut = build_sine_lut();
     let palette = build_palette();
@@ -99,6 +103,7 @@ extern "C" fn main() -> i32 {
             gc_std::system::exit(0);
         }
 
+        let xfb = vid.framebuffer().cast::<u32>();
         for y in 0..height {
             let row = unsafe { xfb.add(y * width / 2) };
             let ly = lut[((y as u32 / 2) & 255) as usize] as u32;
@@ -128,6 +133,6 @@ extern "C" fn main() -> i32 {
         }
 
         t = t.wrapping_add(3);
-        gc_std::video::wait_vsync();
+        vid = vid.flip();
     }
 }
