@@ -155,10 +155,8 @@ fn slot_ptr(idx: u8) -> *mut core::ffi::c_void {
     extern "C" {
         static __xfb_base: u32;
     }
-    unsafe {
-        let base = &raw const __xfb_base as usize;
-        hw::cached_to_uncached((base + idx as usize * XFB_SLOT_BYTES) as *mut core::ffi::c_void)
-    }
+    let base = unsafe { &raw const __xfb_base } as usize;
+    hw::cached_to_uncached((base + idx as usize * XFB_SLOT_BYTES) as *mut core::ffi::c_void)
 }
 
 impl Video {
@@ -369,7 +367,7 @@ unsafe fn vi_reset_with(idx: u32) {
 
 /// Switch to a user-selected mode after init. The flip chain (if in use)
 /// is left intact; both slots are reprogrammed to the new timing.
-pub fn set_mode(v: &Video, standard: Standard, fm: FrameMode) -> Video {
+pub fn set_mode(_v: &Video, standard: Standard, fm: FrameMode) -> Video {
     unsafe {
         let mode = mode_for(standard, fm);
         let front = (*core::ptr::addr_of!(CURRENT)).front;

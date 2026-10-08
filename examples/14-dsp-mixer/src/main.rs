@@ -1,5 +1,5 @@
 //! Example 14 — dsp-mixer: polyphonic audio through the DSP mixer microcode
-//! (AESND port).
+//! (AESND port, libogc-shaped API).
 //!
 //! Three looped voices form a chord that changes pitch every second, while a
 //! fourth voice plays one-shot "ping" accents on top. All mixing happens on
@@ -13,7 +13,7 @@
 #![no_main]
 
 use gc_std::{
-    aesnd::{self, VoiceFormat},
+    aesnd,
     input::{self, button},
     println,
 };
@@ -56,7 +56,7 @@ fn sample_bytes(t: &'static [i16]) -> &'static [u8] {
 }
 
 // -------------------- the "song" ------------------------------------
-// Chord progression: Cmaj7 -> Am7 -> Fmaj7 -> G7 (root freqs, Hz).
+// Chord progression: I - vi - IV - V (root freqs, Hz).
 const CHORDS: [[f32; 3]; 4] = [
     [261.63, 329.63, 392.00], // C E G
     [220.00, 261.63, 329.63], // A C E
@@ -76,60 +76,61 @@ extern "C" fn main() -> i32 {
     println!("\nExample 14 - dsp-mixer (AESND polyphony)");
     println!("3 looped chord voices + 1 one-shot accent via DSP mixing.");
 
-    let a = match aesnd::init() {
-        Ok(a) => a,
-        Err(e) => {
-            println!("aesnd::init failed: {:?} (audio stays silent)", e);
-            loop {
-                gc_std::video::wait_vsync();
-                input::scan();
-                if input::buttons_down(0).contains(button::START) {
-                    gc_std::system::exit(0);
-                }
+    if let Err(e) = aesnd::init() {
+        println!("aesnd::init failed: {:?} (audio stays silent)", e);
+        loop {
+            gc_std::video::wait_vsync();
+            input::scan();
+            if input::buttons_down(0).contains(button::START) {
+                gc_std::system::exit(0);
             }
         }
-    };
-
-    let v0 = a.alloc_voice().expect("voice 0");
-    let v1 = a.alloc_voice().expect("voice 1");
-    let v2 = a.alloc_voice().expect("voice 2");
-    let accent = a.alloc_voice().expect("accent voice");
-    let chord_voices = [v0, v1, v2];
-
-    // accents: one-shot, thinner volume
-    a.set_volume(accent, 0x80, 0x80);
-
-    println!("Voices up. Playing chord loop. START exits.");
-
-    let mut chord = 0usize;
-    let mut frame = 0u32;
-
-    // start the first chord + kick the accent once
-    for (i, voice) in chord_voices.iter().enumerate() {
-        let hz = CHORDS[chord][i];
-        a.play(*voice, VoiceFormat::Mono16, sample_bytes(&INSTRUMENT), play_rate(hz), true);
     }
-    a.play(accent, VoiceFormat::Mono16, sample_bytes(&INSTRUMENT), play_rate(ACCENT_HZ), false);
 
-    loop {
-        gc_std::video::wait_vsync();
-        input::scan();
-        if input::buttons_down(0).contains(button::START) {
-            gc_std::system::exit(0);
+    unsafe {
+        let v0 = aesnd::allocate_voice(None);
+        let v1 = aesnd::allocate_voice(None);
+        let v2 = aesnd::allocate_voice(None);
+        let accent = aesnd::allocate_voice(None);
+        let chord_voices = [v0, v1, v2];
+        assert!(!v0.is_null() && !v1.is_null() && !v2.is_null() && !accent.is_null());
+
+        // accents: one-shot, thinner volume
+        aesnd::set_volume(accent, 0x80, 0x80);
+
+        let data = sample_bytes(&INSTRUMENT);
+        let mut chord = 0usize;
+        let mut frame = 0u32;
+
+        println!("Voices up. Playing chord loop. START exits.");
+
+        // start the first chord + kick the accent once
+        for (i, voice) in chord_voices.iter().enumerate() {
+            let hz = CHORDS[chord][i];
+            aesnd::play_voice(*voice, aesnd::VOICE_MONO16, data.as_ptr(), data.len(), play_rate(hz), 0, true);
         }
+        aesnd::play_voice(accent, aesnd::VOICE_MONO16, data.as_ptr(), data.len(), play_rate(ACCENT_HZ), 0, false);
 
-        frame += 1;
-        if frame % FRAMES_PER_CHORD == 0 {
-            chord = (chord + 1) % CHORDS.len();
-            for (i, voice) in chord_voices.iter().enumerate() {
-                // retune the looped voices
-                a.set_frequency(*voice, play_rate(CHORDS[chord][i]));
+        loop {
+            gc_std::video::wait_vsync();
+            input::scan();
+            if input::buttons_down(0).contains(button::START) {
+                gc_std::system::exit(0);
             }
-            println!("chord: {}", CHORD_NAMES[chord]);
-        }
-        if frame % (FRAMES_PER_CHORD * 2) == 0 {
-            // re-trigger the accent ping every other chord
-            a.play(accent, VoiceFormat::Mono16, sample_bytes(&INSTRUMENT), play_rate(ACCENT_HZ), false);
+
+            frame += 1;
+            if frame % FRAMES_PER_CHORD == 0 {
+                chord = (chord + 1) % CHORDS.len();
+                for (i, voice) in chord_voices.iter().enumerate() {
+                    // retune the looped voices
+                    aesnd::set_frequency(*voice, play_rate(CHORDS[chord][i]));
+                }
+                println!("chord: {}", CHORD_NAMES[chord]);
+            }
+            if frame % (FRAMES_PER_CHORD * 2) == 0 {
+                // re-trigger the accent ping every other chord
+                aesnd::play_voice(accent, aesnd::VOICE_MONO16, data.as_ptr(), data.len(), play_rate(ACCENT_HZ), 0, false);
+            }
         }
     }
 }
