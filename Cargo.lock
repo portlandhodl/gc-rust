@@ -17,6 +17,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "exi-sram"
+version = "0.1.0"
+dependencies = [
+ "gc-std",
+]
+
+[[package]]
 name = "gc-std"
 version = "0.1.0"
 
