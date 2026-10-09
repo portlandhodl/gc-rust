@@ -20,12 +20,16 @@ _start:
     oris 3, 3, 0x8000
     mtlr 3
 
-    // Drop to real mode at ".Lreal"
-    lis 3, .Lreal@ha
+    // Drop to real mode (translation OFF) at the *physical* address of
+    // ".Lreal", like libogc's __realmode: the BAT rewrite below removes the
+    // mapping we'd otherwise be fetching through. (Dolphin's JIT hides a
+    // translated version of this; a real Gekko takes an ISI.)
+    lis 3, .Lreal@h
     ori 3, 3, .Lreal@l
+    clrlwi 3, 3, 2      // 0x8000xxxx -> 0x0000xxxx
     mtsrr0 3
 
-    li 3, 0x0032        // MSR_FP | MSR_ME | MSR_RI
+    li 3, 0x3002        // MSR_FP | MSR_ME | MSR_RI
     mtsrr1 3
     rfi
 
@@ -133,24 +137,31 @@ _start:
     mtspr 1008, 3
     isync
 
-    // FPSCR = 0, then set NI bit
-    li 5, 0
-    stw 5, -16(1)
-    stw 5, -12(1)
-    lfd 0, -16(1)
-    mtfsf 0xff, 0
+    // FPSCR = 0 field by field (no memory: r1 isn't a stack yet), then NI
+    mtfsfi 0, 0
+    mtfsfi 1, 0
+    mtfsfi 2, 0
+    mtfsfi 3, 0
+    mtfsfi 4, 0
+    mtfsfi 5, 0
+    mtfsfi 6, 0
+    mtfsfi 7, 0
     mtfsb1 29
 
-    // re-enable MMU
-    mfmsr 3
-    ori 3, 3, 0x0030
-    mtmsr 3
-    isync
+    // back to translated mode at the *virtual* address of ".Lvirt"
+    lis 3, .Lvirt@h
+    ori 3, 3, .Lvirt@l
+    mtsrr0 3
+    li 3, 0x3032        // MSR_FP | MSR_ME | MSR_IR | MSR_DR | MSR_RI
+    mtsrr1 3
+    rfi
+
+.Lvirt:
 
     // --- Part 2: C environment --------------------------------------------
 
     // stack at top of MEM1 (IBA needs 8-byte align; keep 16 spare)
-    lis 1, __stack@ha
+    lis 1, __stack@h
     ori 1, 1, __stack@l
     li 0, 0
     stw 0, -16(1)

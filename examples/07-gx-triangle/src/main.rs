@@ -41,6 +41,9 @@ extern "C" fn main() -> i32 {
         0,
     );
     gx::config_vertex_color_pipeline();
+    // the triangle is wound counter-clockwise, which GX treats as
+    // back-facing; the default GX_CULL_BACK would hide it entirely
+    gx::set_cull_mode(gx::GX_CULL_NONE);
 
     let camera = gu::vec3(0.0, 0.0, 0.0);
     let up = gu::vec3(0.0, 1.0, 0.0);

@@ -2,6 +2,13 @@
 
 **Write Nintendo GameCube homebrew in 100% pure Rust — no devkitPro, no libogc, no C toolchain needed.**
 
+![yarn-cat: a low-poly orange kitten batting a ball of yarn inside a retro TV](docs/yarn-cat.png)
+
+*`yarn-cat` (example 23): a low-poly kitten that lives inside your TV and
+plays with a ball of yarn — GX-rendered, flat-shaded, running on a real
+GameCube. `make sd EXAMPLE=yarn-cat` builds a Swiss-ready SD folder with a
+banner.*
+
 `gc-rust` is a self-hosted Rust target (`powerpc-gekko-none-eabi`) for the GameCube's Gekko CPU (big-endian PowerPC 750CXe). rustc compiles your code, `rust-lld` links it against a memory map we ship (`memory.x.ld`), and a tiny pure-Rust `gc-dol` tool packs the ELF into a bootable `.dol`.
 
 The platform library, `gc-std`, is written in Rust (with one startup assembly block and MMIO register constants ported from the public-domain-ish libogc register documentation/Dolphin emulator):
@@ -56,20 +63,27 @@ make check    # packer unit tests (incl. synthetic ELF + every dist/*.dol),
               # headless Dolphin smoke boot of every dist/*.dol.
 ```
 
-The Dolphin smoke test needs `flatpak install flathub org.DolphinEmu.dolphin-emu`. It is skipped with code 77 when absent. For deeper testing (GDB stub, MemoryWatcher, frame dumps), build Dolphin from source — the flatpak headless build has those hooks compiled out:
+The Dolphin smoke tests use a source build of Dolphin (nogui) at
+`~/git/dolphin/build-x86_64-release/Binaries/dolphin-emu-nogui` (override
+with `DOLPHIN_NOGUI=...`); they are skipped with code 77 when it's absent:
 
 ```bash
 cmake -G Ninja -B build-x86_64-release \
   -DENABLE_QT=OFF -DENABLE_NOGUI=ON -DENABLE_TESTS=OFF \
   -DENABLE_VULKAN=OFF -DENABLE_LLVM=OFF
-ninja -C build-x86_64-release dolphin-nogui
+ninja -C build-x86_64-release dolphin-emu-nogui
+ln -s ../../Data/Sys build-x86_64-release/Binaries/Sys   # uninstalled build needs its data
 ```
 
-Then in Dolphin (GUI for actual pixels):
+Then, in a window:
 
 ```bash
-make run EXAMPLE=gx-cube   # or: dolphin-emu --batch --exec=dist/gx-cube.dol
+make run EXAMPLE=yarn-cat
 ```
+
+Dolphin is forgiving where real hardware isn't (cache coherency, GX
+fixed-point rasterizer range, the zcomploc copy-clear quirk, alignment
+exceptions…): verify on a console before trusting a GX change.
 
 On hardware: copy the `.dol` onto an SD card and load it with Swiss (or any other GC homebrew loader), e.g. via SD2SP2, BBA, or a memory-card exploit.
 
@@ -99,6 +113,17 @@ On hardware: copy the `.dol` onto an SD card and load it with Swiss (or any othe
 | 20 | `threads`            | Preemptive LWP: background agent with sleeps + foreground loop |
 | 21 | `thread-sync`        | LWP Channel/Mutex/WaitQueue: game pushes jobs onto a parked agent |
 | 22 | `net-echo`           | BBA ethernet: probe, bring-up, ARP gateway, ICMP ping          |
+| 23 | `yarn-cat`           | Low-poly kitten chasing yarn in a TV room: flat-shaded GX scene, springy animation (A tosses, stick nudges) |
+| 24 | `gx-diag`            | GX test card: 2D, depth test, culling per quadrant — photograph it on hardware |
+| 25 | `gx-selftest`        | GX self-test: draws, reads the EFB back, prints PASS/FAIL on the console |
+
+### Running on a GameCube with Swiss
+
+`make sd EXAMPLE=yarn-cat` writes `dist/sd/yarn-cat/` containing
+`default.dol` + `opening.bnr`. Copy that folder to the SD card; Swiss
+lists it as one entry with the banner image, title and description
+(`tools/gc-bnr` builds the BNR1 banner from `examples/NN-<name>/banner.ppm`
++ `banner.txt`).
 
 Every resulting `.dol` contains Rust + hardware glue only. No C, no assembly libraries, zero non-Rust code.
 

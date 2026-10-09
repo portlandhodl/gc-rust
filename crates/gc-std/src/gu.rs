@@ -40,7 +40,7 @@ fn cos_taylor(x: f32) -> f32 {
     1.0 + x2 * (-0.5 + x2 * (1.0 / 24.0 + x2 * (-1.0 / 720.0)))
 }
 
-fn sinf(mut x: f32) -> f32 {
+pub fn sinf(mut x: f32) -> f32 {
     const PI: f32 = core::f32::consts::PI;
     const FRAC_PI_2: f32 = core::f32::consts::FRAC_PI_2;
     const FRAC_PI_4: f32 = core::f32::consts::FRAC_PI_4;
@@ -68,7 +68,7 @@ fn sinf(mut x: f32) -> f32 {
     sign * v
 }
 
-fn cosf(x: f32) -> f32 {
+pub fn cosf(x: f32) -> f32 {
     sinf(x + core::f32::consts::FRAC_PI_2)
 }
 
@@ -76,7 +76,7 @@ fn tanf(x: f32) -> f32 {
     sinf(x) / cosf(x)
 }
 
-fn sqrtf(x: f32) -> f32 {
+pub fn sqrtf(x: f32) -> f32 {
     if x <= 0.0 {
         return 0.0;
     }
@@ -105,6 +105,19 @@ pub fn perspective(fovy_deg: f32, aspect: f32, n: f32, f: f32) -> Mtx44 {
     m[2][2] = -n * tmp;
     m[2][3] = -(f * n) * tmp;
     m[3][2] = -1.0;
+    m
+}
+
+/// `guOrtho(m, top, bottom, left, right, n, f)` — libogc formula.
+pub fn ortho(t: f32, b: f32, l: f32, r: f32, n: f32, f: f32) -> Mtx44 {
+    let mut m = [[0.0f32; 4]; 4];
+    m[0][0] = 2.0 / (r - l);
+    m[0][3] = -(r + l) / (r - l);
+    m[1][1] = 2.0 / (t - b);
+    m[1][3] = -(t + b) / (t - b);
+    m[2][2] = -1.0 / (f - n);
+    m[2][3] = -f / (f - n);
+    m[3][3] = 1.0;
     m
 }
 

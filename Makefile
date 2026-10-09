@@ -33,11 +33,17 @@ EXAMPLES := \
 	exi-sram \
 	memcard \
 	usb-gecko \
-	sd-file
+	sd-file \
+	yarn-cat \
+	gx-diag \
+	gx-selftest
 
 DOLS := $(addprefix dist/,$(addsuffix .dol,$(EXAMPLES)))
 
 HOST_TARGET := $(shell rustc -vV | sed -n 's/host: //p')
+
+# Source-built Dolphin (nogui); `make run` opens it in an X11 window.
+DOLPHIN_NOGUI ?= $(HOME)/git/dolphin/build-x86_64-release/Binaries/dolphin-emu-nogui
 
 .PHONY: all list clean run check test $(EXAMPLES)
 
@@ -47,6 +53,7 @@ all: tools/dol/gc-dol $(DOLS)
 # Unit tests + DOL header validation + Dolphin smoke test.
 check: all
 	@cd tools/gc-dol && cargo test --release
+	@cd tools/gc-bnr && cargo test --release
 	@cd tools/gc-host-tests && cargo test --release
 	@sh tests/dolphin-smoke.sh
 	@sh tests/dolphin-iso-smoke.sh
@@ -59,7 +66,7 @@ list:
 $(EXAMPLES): %: dist/%.dol
 	@echo built: $<
 
-tools/dol/gc-dol: tools/gc-dol/src/main.rs tools/gc-dol/Cargo.toml
+tools/dol/gc-dol: tools/gc-dol/src/main.rs tools/gc-dol/src/lib.rs tools/gc-dol/Cargo.toml
 	cd tools/gc-dol && cargo build --release --target x86_64-unknown-linux-gnu
 	mkdir -p tools/dol
 	cp -f tools/gc-dol/target-host/x86_64-unknown-linux-gnu/release/gc-dol tools/dol/gc-dol
@@ -86,14 +93,32 @@ clean:
 	rm -rf dist tools/dol/gc-dol
 
 run: dist/$(EXAMPLE).dol
-	dolphin-emu --batch --exec=$<
+	$(DOLPHIN_NOGUI) -p x11 -e $(abspath $<)
 
 
 # ISO packaging path: builds the apploader payload + packs a bootable GCM.
 APPLOADER_ELF := crates/apploader/target/powerpc-gekko-none-eabi/release/gc-apploader
 GC_ISO := tools/gc-iso/target/x86_64-unknown-linux-gnu/release/gc-iso
 
-.PHONY: iso run-iso
+.PHONY: iso run-iso sd
+
+# `make sd EXAMPLE=yarn-cat` — Swiss-ready SD card folder:
+#   dist/sd/<example>/default.dol + opening.bnr (banner image + title text)
+# Copy the <example> folder to the SD card; Swiss lists it as one entry
+# with the banner. Needs examples/NN-<example>/banner.ppm + banner.txt.
+GC_BNR := tools/gc-bnr/target-host/x86_64-unknown-linux-gnu/release/gc-bnr
+EXAMPLE_DIR = $(firstword $(wildcard examples/*-$(EXAMPLE)))
+
+sd: dist/$(EXAMPLE).dol $(GC_BNR)
+	@test -f $(EXAMPLE_DIR)/banner.ppm || { echo "no banner.ppm in $(EXAMPLE_DIR)"; exit 1; }
+	mkdir -p dist/sd/$(EXAMPLE)
+	cp -f dist/$(EXAMPLE).dol dist/sd/$(EXAMPLE)/default.dol
+	$(GC_BNR) --image $(EXAMPLE_DIR)/banner.ppm --text $(EXAMPLE_DIR)/banner.txt \
+	    -o dist/sd/$(EXAMPLE)/opening.bnr
+	@echo "SD folder ready: dist/sd/$(EXAMPLE)/ (copy the whole folder to the card)"
+
+$(GC_BNR): tools/gc-bnr/src/main.rs tools/gc-bnr/src/lib.rs tools/gc-bnr/Cargo.toml
+	cd tools/gc-bnr && cargo build --release
 
 # `make iso EXAMPLE=dvd-read` — emit dist/<example>.iso (bootable GCM)
 DVD_README := examples/19-dvd-read/readme.txt
@@ -112,4 +137,4 @@ $(GC_ISO): tools/gc-iso/src/main.rs
 	cd tools/gc-iso && cargo build --release
 
 run-iso: dist/$(EXAMPLE).iso
-	dolphin-emu --batch --exec=dist/$(EXAMPLE).iso
+	$(DOLPHIN_NOGUI) -p x11 -e $(abspath dist/$(EXAMPLE).iso)

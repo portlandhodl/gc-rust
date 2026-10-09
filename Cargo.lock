@@ -49,7 +49,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "gx-diag"
+version = "0.1.0"
+dependencies = [
+ "gc-std",
+]
+
+[[package]]
 name = "gx-lit-cube"
+version = "0.1.0"
+dependencies = [
+ "gc-std",
+]
+
+[[package]]
+name = "gx-selftest"
 version = "0.1.0"
 dependencies = [
  "gc-std",
@@ -155,6 +169,13 @@ dependencies = [
 
 [[package]]
 name = "video-info"
+version = "0.1.0"
+dependencies = [
+ "gc-std",
+]
+
+[[package]]
+name = "yarn-cat"
 version = "0.1.0"
 dependencies = [
  "gc-std",

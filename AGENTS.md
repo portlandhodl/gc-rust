@@ -10,7 +10,8 @@ via the in-tree `tools/gc-dol` host tool.
   (`powerpc-unknown-none` LLVM triple, `cpu = "750"`, `+fpu`,
   `panic-strategy = "abort"`, `linker = "rust-lld"`)
 - `memory.x.ld` — linker script (MEM1 24 MiB); reserves TWO worst-case
-  XFB slots at `__xfb_base` (0x81694000) for the VI flip chain.
+  XFB slots at `__xfb_base` (0x81684000) for the VI flip chain; the main
+  stack sits above them (~76 KiB) below `__stack` (0x817FEFF0).
 - `crates/gc-std/` — the platform library:
   - `crt0.rs` — `_start` (asm bring-up, BSS zero, stack). doc: basis is
     libogc's PPCEarlyInit (zlib), ported 1:1.
@@ -73,6 +74,8 @@ via the in-tree `tools/gc-dol` host tool.
 - `examples/NN-name/` — a bin per example; package name = dir basename without `NN-`.
   Workspace globs them in automatically (`members = ["crates/gc-std", "examples/*"]`).
 - `tools/gc-dol/` — host tool converting ELF32BE → GameCube DOL.
+- `tools/gc-bnr/` — host tool building `opening.bnr` (BNR1: 96x32 RGB5A3
+  banner + title/description) from a PPM + 5-line text file.
 
 ## Build
 
@@ -80,24 +83,29 @@ via the in-tree `tools/gc-dol` host tool.
 - `make <pkg>` — one example (names: hello-console, pad-input, heap-strings,
   video-info, pixel-plasma, gx-clear, gx-triangle, gx-cube, gx-textured-cube,
   gx-lit-cube, irq-timer, pad-calibrated, audio-beep, dsp-mixer, exi-sram,
-  memcard, usb-gecko, sd-file, dvd-read, threads, thread-sync, net-echo).
+  memcard, usb-gecko, sd-file, dvd-read, threads, thread-sync, net-echo,
+  yarn-cat).
 - `make iso EXAMPLE=dvd-read` — build a bootable GCM (gc-iso + apploader).
+- `make sd EXAMPLE=yarn-cat` — Swiss SD folder `dist/sd/<ex>/` with
+  `default.dol` + `opening.bnr` (from `examples/NN-<ex>/banner.ppm` +
+  `banner.txt`); Swiss shows such a folder as one entry with the banner.
 - `tests/dvd-iso-e2e.sh` — boots the ISO in Dolphin + watches the
   observation mailbox via MemoryWatcher (needs a Dolphin build with
-  USE_MEMORYWATCHER compiled in; the headless flatpak here has it off).
+  USE_MEMORYWATCHER compiled in).
 - `tests/memcard-persist.sh` / `tests/usbgecko-e2e.sh` — manual E2E tests
   (need desktop Dolphin; not wired into `make check`).
-- `make iso EXAMPLE=dvd-read` — build a bootable GCM (gc-iso + apploader).
-- `tests/dvd-iso-e2e.sh` — boots the ISO in Dolphin + watches the
-  observation mailbox via MemoryWatcher (needs a Dolphin build with
-  USE_MEMORYWATCHER compiled in; the headless flatpak here has it off).
-- `tests/dolphin-iso-smoke.sh` — ISO boot smoke (works with the nogui
-  source build; the flatpak can't boot plain .dol files but ISOs fine).
+- `tests/dolphin-iso-smoke.sh` — ISO boot smoke (nogui source build).
 - A working local source build of Dolphin (nogui) lives at
   `~/git/dolphin/build-x86_64-release/Binaries/dolphin-emu-nogui` — build
   it with:
   `cmake -G Ninja -DENABLE_QT=OFF -DENABLE_NOGUI=ON -DENABLE_TESTS=OFF -DENABLE_VULKAN=OFF -DENABLE_LLVM=OFF`.
-- `make run EXAMPLE=<pkg>` — Dolphin.
+  Its `Binaries/Sys` must exist (symlink to `../../Data/Sys`) — the build
+  is not installed, and without Sys Dolphin can't find its data.
+  The flatpak Dolphin is no longer used.
+- `make run EXAMPLE=<pkg>` — opens the DOL in that Dolphin (X11 window).
+- Seeing frames without a window: `-p headless -C Dolphin.Movie.DumpFrames=True
+  -C Dolphin.Movie.DumpFramesSilent=True` writes `<user>/Dump/Frames/*.avi`
+  (this build has FFmpeg, so it's an AVI, not PNGs); pull stills with ffmpeg.
 
 ## Conventions
 
@@ -121,6 +129,7 @@ via the in-tree `tools/gc-dol` host tool.
      driving the real card.rs state machine, and an SPI-level emulated SD
      card with a FAT32 image driving sd.rs + fat.rs, tested on host.
   3. `tests/dolphin-smoke.sh`: boots each `dist/*.dol` in headless Dolphin
-     (flatpak) for 6s; panic/DSI/ISI/illegal-instruction = fail.
+     (nogui source build) for 6s; boot failure, panic, DSI/ISI, illegal
+     instruction or invalid memory access = fail.
 - Run manually: `sh tests/dolphin-smoke.sh [names...]`,
   `RUN_SECS=<n>` overrides the 6s default.

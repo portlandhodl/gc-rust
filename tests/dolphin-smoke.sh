@@ -3,10 +3,12 @@
 #
 # Usage:  tests/dolphin-smoke.sh [NAME ...]   (all examples if no names)
 #
-# A run PASSES if the process stays up until we kill it (the demos run
-# forever) and no PanicAlert/DSI/"Illegal instruction" lines appear.
+# A run PASSES if the process stays up until we stop it (the demos run
+# forever) and Dolphin reports no boot failure, PanicAlert, DSI/ISI,
+# illegal instruction or invalid memory access.
 #
-# Requires: flatpak org.DolphinEmu.dolphin-emu
+# Requires: a source build of Dolphin (nogui) at $DOLPHIN_NOGUI, default
+# ~/git/dolphin/build-x86_64-release/Binaries/dolphin-emu-nogui.
 
 set -u
 
@@ -14,17 +16,9 @@ FAILURES=0
 RUN_SECS=${RUN_SECS:-6}
 USER_DIR=$(mktemp -d)
 
-# DOL smoke needs the flatpak (the source-built nogui frontend refuses
-# plain DOL loads; ISOs work everywhere — see tests/dolphin-iso-smoke.sh).
-DOLPHIN_SRC="$HOME/git/dolphin/build-x86_64-release/Binaries/dolphin-emu-nogui"
-if flatpak info org.DolphinEmu.dolphin-emu >/dev/null 2>&1; then
-    DOLPHIN="org.DolphinEmu.dolphin-emu"
-    DOLPHIN_PREFIX="flatpak run --env=QT_QPA_PLATFORM=offscreen"
-elif [ -x "$DOLPHIN_SRC" ]; then
-    echo "SKIP: nogui dolphin can't boot .dol files" >&2
-    exit 77
-else
-    echo "SKIP: no dolphin found" >&2
+DOLPHIN_NOGUI=${DOLPHIN_NOGUI:-$HOME/git/dolphin/build-x86_64-release/Binaries/dolphin-emu-nogui}
+if [ ! -x "$DOLPHIN_NOGUI" ]; then
+    echo "SKIP: no dolphin-emu-nogui at $DOLPHIN_NOGUI" >&2
     exit 77
 fi
 
@@ -34,17 +28,17 @@ run_one() {
     [ -f "$dol" ] || { echo "FAIL $name: $dol not found"; FAILURES=$((FAILURES+1)); return 0; }
     log="$USER_DIR/out.log"
     rm -f "$log"
-    timeout -s KILL -k 2 "$RUN_SECS" \
-        flatpak run --env=QT_QPA_PLATFORM=offscreen \
-        $DOLPHIN -b -v Null -a HLE \
-        -u "$USER_DIR/user" -e "$dol" >"$log" 2>&1
+    # SIGTERM first (nogui shuts down cleanly), KILL if it lingers
+    timeout -k 2 "$RUN_SECS" \
+        "$DOLPHIN_NOGUI" -p headless -v Null -a HLE \
+        -u "$USER_DIR/user" -e "$PWD/$dol" >"$log" 2>&1
     rc=$?
-    errs=$(grep -icE 'panicalert|assert|segfault|core dumped|DSI|ISI|illegal instruction|aborting' "$log" 2>/dev/null || true)
+    errs=$(grep -icE 'panicalert|assert|segfault|core dumped|DSI|ISI|illegal instruction|aborting|could not boot|invalid (read|write)' "$log" 2>/dev/null || true)
     if [ "$rc" = "124" ] && [ "${errs}" = "0" ]; then
         echo "PASS $name"
     else
         echo "FAIL $name (rc=$rc errs=$errs)"
-        grep -iE 'panicalert|assert|DSI|ISI|illegal instruction' "$log" 2>/dev/null | head -5
+        grep -iE 'panicalert|assert|DSI|ISI|illegal instruction|could not boot|invalid (read|write)' "$log" 2>/dev/null | head -5
         FAILURES=$((FAILURES+1))
     fi
 }
