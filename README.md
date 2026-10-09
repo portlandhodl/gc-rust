@@ -28,12 +28,9 @@ PowerPC 750CXe), `rust-lld` links it against a memory map we ship, and a
 tiny pure-Rust tool packs it into a bootable `.dol`. That's the whole
 toolchain.
 
-```
-┌───────────────┐    ┌───────────────────┐    ┌──────────┐    ┌────────┐
-│ your Rust app │──▶ │ gc-std (pure Rust)│──▶ │ rust-lld │──▶ │ gc-dol │──▶ 🎮 .dol
-│  (#![no_std]) │    │  crt0 + drivers   │    └──────────┘    └────────┘
-└───────────────┘    └───────────────────┘
-```
+<p align="center">
+  <img src="docs/pipeline.svg" width="900" alt="Build pipeline: your Rust app, gc-std and core/alloc go through rustc (powerpc-gekko-none-eabi), rust-lld (memory.x.ld) and gc-dol to a .dol that runs on a GameCube via Swiss or in Dolphin, or becomes a bootable .iso via gc-iso; gc-bnr makes the Swiss banner.">
+</p>
 
 ## ⚡ Quick start
 
