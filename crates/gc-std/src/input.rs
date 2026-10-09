@@ -186,7 +186,10 @@ pub fn scan() {
 
             let orig = &(*core::ptr::addr_of!(ORIGIN))[ci];
 
-            let mut btn = ((hi >> 16) & 0x1fff) as u16;
+            // bit 0x0080 is the pad's "use origin" status flag, not a
+            // button (normally always set) — masking it keeps
+            // `buttons_held().any()` honest
+            let mut btn = ((hi >> 16) & 0x1f7f) as u16;
             let a = Analog {
                 stick_x: clamp_stick((hi >> 8) as u8, orig[2]),
                 stick_y: clamp_stick(hi as u8, orig[3]),

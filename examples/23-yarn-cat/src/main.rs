@@ -10,7 +10,10 @@
 //! face with a half-lambert key light for a soft "toy" look, collected
 //! into one triangle batch and streamed through immediate mode.
 //!
-//! Controls: A tosses the ball, the stick nudges it, START exits.
+//! Controls: the stick walks the cat (screen-relative), A swats/kicks the
+//! yarn, B tosses it somewhere random, START exits. Leave the controller
+//! alone for 8 seconds and the cat goes back to playing by itself, like a
+//! screensaver (the TV's power LED is orange while you're in control).
 
 #![no_std]
 #![no_main]
@@ -436,7 +439,7 @@ fn ribbon(b: &mut Batch, p: V3, q: V3, w: f32, col: Rgb) {
 
 const ROOM_X: f32 = 2.4;
 const ROOM_BACK: f32 = -2.2;
-const ROOM_FRONT: f32 = 1.2;
+const ROOM_FRONT: f32 = 1.8;
 /// The floor runs past the play area towards the viewer so its front
 /// edge never shows inside the bezel — but stays >= ~1.5 units in front of
 /// the camera so nothing straddles the near plane (real GX clipping of
@@ -477,6 +480,21 @@ enum State {
     Crouch,
     Swat,
     Watch,
+    /// a human is driving with the controller
+    Player,
+}
+
+/// Controller input for the cat, already in world terms.
+#[derive(Copy, Clone, Default)]
+struct Control {
+    /// someone has touched the controller recently; otherwise the cat plays
+    /// on its own like a screensaver
+    active: bool,
+    /// desired walk direction on the floor (x, z), length 0..1
+    move_x: f32,
+    move_z: f32,
+    /// A was just pressed: swat / kick
+    swat: bool,
 }
 
 /// A damped spring for secondary motion: chases `target` with a little
@@ -761,7 +779,7 @@ fn spine_nodes(cat: &Cat) -> [(f32, f32); SPINE] {
     nodes
 }
 
-fn step_cat(cat: &mut Cat, ball: &mut Ball, rng: &mut Rng, hearts: &mut [Heart; 4]) {
+fn step_cat(cat: &mut Cat, ball: &mut Ball, rng: &mut Rng, hearts: &mut [Heart; 4], ctl: &Control) {
     let (dx, dz) = (ball.x - cat.x, ball.z - cat.z);
     let dist = sqrt(dx * dx + dz * dz);
     let want = atan2(dx, dz) * (180.0 / PI);
@@ -778,6 +796,19 @@ fn step_cat(cat: &mut Cat, ball: &mut Ball, rng: &mut Rng, hearts: &mut [Heart; 
     let mut target_pitch = 0.0f32;
     let target_perk: f32;
     cat.timer += 1;
+
+    // hand-over: any controller input takes over at once; when it goes
+    // quiet the cat drifts back to playing by itself
+    if ctl.active && matches!(cat.state, State::Chase | State::Crouch | State::Watch) {
+        cat.state = State::Player;
+        cat.timer = 0;
+    } else if !ctl.active && cat.state == State::Player {
+        cat.state = State::Watch;
+        cat.timer = 0;
+        cat.watch_len = 40;
+    }
+    // the direction the body steers towards: the yarn, or the stick
+    let mut steer = diff;
 
     match cat.state {
         State::Chase => {
@@ -842,7 +873,15 @@ fn step_cat(cat: &mut Cat, ball: &mut Ball, rng: &mut Rng, hearts: &mut [Heart; 
                 1.0 - ease_in_out((tm - 14.0) / 12.0)
             };
             cat.lunge = 0.07 * clampf(cat.paw, 0.0, 1.0);
-            if cat.timer == 9 && dist < 1.1 {
+            let h = cat.heading * (PI / 180.0);
+            let facing = (sin(h) * dx + cos(h) * dz) / dist.max(1e-4);
+            if cat.timer == 9 && ctl.active && dist < 1.15 && facing > 0.3 {
+                // the player's swat: a proper kick where the cat is facing
+                kick(ball, cat.heading + rng.range(-12.0, 12.0), rng.range(0.11, 0.15));
+                if let Some(hh) = hearts.iter_mut().find(|hh| hh.age == 0) {
+                    *hh = Heart { x: cat.x + sin(h) * 0.4, y: 1.55, z: cat.z + cos(h) * 0.4, age: 1 };
+                }
+            } else if cat.timer == 9 && !ctl.active && dist < 1.1 {
                 // cats bat sideways: pick the side facing the open room
                 // (straight ahead is the wall or, after a bounce, the cat)
                 let (cx, cz) = (0.2 - ball.x, -0.5 - ball.z);
@@ -872,9 +911,34 @@ fn step_cat(cat: &mut Cat, ball: &mut Ball, rng: &mut Rng, hearts: &mut [Heart; 
             }
             if cat.timer > 26 {
                 cat.paw = 0.0;
-                cat.state = State::Watch;
                 cat.timer = 0;
-                cat.watch_len = 70 + (rng.next() % 110);
+                if ctl.active {
+                    cat.state = State::Player;
+                } else {
+                    cat.state = State::Watch;
+                    cat.watch_len = 70 + (rng.next() % 110);
+                }
+            }
+        }
+        State::Player => {
+            let mag = sqrt(ctl.move_x * ctl.move_x + ctl.move_z * ctl.move_z);
+            if mag > 0.05 {
+                let want_dir = atan2(ctl.move_x, ctl.move_z) * (180.0 / PI);
+                steer = wrap180(want_dir - cat.heading);
+                max_turn = 10.0;
+                // walk on a light push, run on a full one; turn first
+                // when asked to go the other way
+                target_speed = mag * 0.055 * if absf(steer) > 100.0 { 0.25 } else { 1.0 };
+            } else {
+                steer = 0.0;
+            }
+            // keep an eye on the yarn while being driven around
+            target_yaw = clampf(diff, -50.0, 50.0) * clampf(2.0 - dist, 0.0, 1.0);
+            target_pitch = clampf((1.6 - dist) * 12.0, 0.0, 12.0);
+            target_perk = clampf(1.5 - dist, 0.0, 1.0);
+            if ctl.swat {
+                cat.state = State::Swat;
+                cat.timer = 0;
             }
         }
         State::Watch => {
@@ -898,7 +962,7 @@ fn step_cat(cat: &mut Cat, ball: &mut Ball, rng: &mut Rng, hearts: &mut [Heart; 
 
     // turning: ease the turn rate in and out instead of snapping a fixed
     // angle per frame; slow down while turning hard
-    let want_turn = clampf(diff * 0.22, -max_turn, max_turn);
+    let want_turn = clampf(steer * 0.22, -max_turn, max_turn);
     cat.turn += (want_turn - cat.turn) * 0.3;
     cat.heading = wrap180(cat.heading + cat.turn);
     let turn_slow = 1.0 - clampf(absf(cat.turn) / 12.0, 0.0, 0.55);
@@ -1344,7 +1408,8 @@ fn rrect(i: usize, per_corner: usize, cy: f32, hw: f32, hh: f32, r: f32) -> (f32
 }
 
 /// The retro TV bezel, drawn in view space at z = -1.2.
-fn draw_bezel(b: &mut Batch, half_h: f32, frame: u32) {
+/// `driven`: someone is playing — the power LED glows orange.
+fn draw_bezel(b: &mut Batch, half_h: f32, driven: bool) {
     let z = -1.2;
     let (cy, hw, hh, r) = (0.06, 0.70, 0.49, 0.12);
     let pc = 6;
@@ -1400,7 +1465,7 @@ fn draw_bezel(b: &mut Batch, half_h: f32, frame: u32) {
         let y = ky - 0.03 + k as f32 * 0.02;
         xy_rect(b, -0.66, y, -0.36, y + 0.008, zz, [150, 132, 110], [150, 132, 110]);
     }
-    let led = if (frame / 90) % 8 == 0 { [255, 150, 60] } else { [110, 255, 140] };
+    let led = if driven { [255, 150, 40] } else { [110, 255, 140] };
     xy_disc(b, 0.22, ky, zz, 0.012, 8, led);
     for kx in [0.46f32, 0.6] {
         xy_disc(b, kx, ky, zz, 0.042, 12, [148, 92, 62]);
@@ -1449,6 +1514,10 @@ extern "C" fn main() -> i32 {
     let mut trail = Trail { pts: [(0.0, 0.0); TRAIL], head: 0, len: 0 };
     let mut hearts = [Heart { x: 0.0, y: 0.0, z: 0.0, age: 0 }; 4];
     let mut frame: u32 = 0;
+    // frames since the controller was last touched (starts "long ago" so
+    // the cat begins in screensaver mode)
+    const IDLE_FRAMES: u32 = 8 * 60;
+    let mut idle: u32 = IDLE_FRAMES;
 
     let up = gu::vec3(0.0, 1.0, 0.0);
     let bezel_view = gu::identity();
@@ -1459,20 +1528,37 @@ extern "C" fn main() -> i32 {
         if down.contains(button::START) {
             gc_std::system::exit(0);
         }
-        if down.contains(button::A) {
-            kick(&mut ball, rng.range(-180.0, 180.0), rng.range(0.08, 0.14));
-        }
+        // stick walks the cat (screen-relative: up = into the room), A
+        // swats/kicks, B tosses the yarn. After IDLE_FRAMES without input
+        // the cat goes back to playing on its own.
+        let mut ctl = Control::default();
         let a = gc_std::input::analog(0);
+        let (mut sx, mut sy) = (0.0f32, 0.0f32);
         if a.present {
-            let (sx, sy) = (f32::from(a.stick_x), f32::from(a.stick_y));
-            if absf(sx) > 24.0 || absf(sy) > 24.0 {
-                ball.vx += sx / 127.0 * 0.004;
-                ball.vz -= sy / 127.0 * 0.004;
+            (sx, sy) = (f32::from(a.stick_x), f32::from(a.stick_y));
+            if absf(sx) < 24.0 && absf(sy) < 24.0 {
+                (sx, sy) = (0.0, 0.0);
             }
+        }
+        if sx != 0.0 || sy != 0.0 || gc_std::input::buttons_held(0).any() {
+            idle = 0;
+        } else {
+            idle = idle.saturating_add(1);
+        }
+        ctl.active = idle < IDLE_FRAMES;
+        if ctl.active {
+            let m = clampf(sqrt(sx * sx + sy * sy) / 90.0, 0.0, 1.0);
+            let l = sqrt(sx * sx + sy * sy).max(1e-4);
+            ctl.move_x = sx / l * m;
+            ctl.move_z = -sy / l * m;
+            ctl.swat = down.contains(button::A);
+        }
+        if down.contains(button::B) {
+            kick(&mut ball, rng.range(-180.0, 180.0), rng.range(0.08, 0.14));
         }
 
         step_ball(&mut ball, &mut trail);
-        step_cat(&mut cat, &mut ball, &mut rng, &mut hearts);
+        step_cat(&mut cat, &mut ball, &mut rng, &mut hearts, &ctl);
         for h in hearts.iter_mut().filter(|h| h.age > 0) {
             h.age += 1;
             if h.age > 70 {
@@ -1500,7 +1586,7 @@ extern "C" fn main() -> i32 {
         if !diag("nobezel") {
             gx.load_model_view(&bezel_view);
             gx::set_z_mode(false, gx::GX_ALWAYS, false);
-            draw_bezel(&mut batch, half_h, frame);
+            draw_bezel(&mut batch, half_h, ctl.active);
             batch.submit();
         }
 
