@@ -10,7 +10,7 @@
 [![Runs on](https://img.shields.io/badge/runs%20on-real%20GameCube%20%2B%20Dolphin-purple)](#-on-a-real-gamecube)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#-license)
 
-![yarn-cat: a low-poly orange kitten batting a ball of yarn inside a retro TV](docs/yarn-cat.png)
+![yarn-cat: a low-poly orange kitten looks at the screen, crouches, wiggles, swats its ball of yarn and trots after it, inside a retro TV](docs/yarn-cat.gif)
 
 *Meet **yarn-cat** — a low-poly kitten who lives inside your TV and will not
 stop batting that ball of yarn. GX-rendered, spring-animated, written in Rust,
