@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 360" width="1100" height="360" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title>gc-rust build pipeline: your Rust app, gc-std and core/alloc are compiled by rustc for powerpc-gekko-none-eabi, linked by rust-lld with memory.x.ld, packed into a .dol by gc-dol, then run on a GameCube via Swiss or in Dolphin, or packed into a bootable ISO by gc-iso; gc-bnr builds the Swiss banner.</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1f1b2e"/>
+      <stop offset="1" stop-color="#2a2140"/>
+    </linearGradient>
+    <linearGradient id="rust" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f6a04d"/>
+      <stop offset="1" stop-color="#d9661c"/>
+    </linearGradient>
+    <linearGradient id="tool" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8b7cf6"/>
+      <stop offset="1" stop-color="#5b4bc4"/>
+    </linearGradient>
+    <linearGradient id="out" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3fc1b0"/>
+      <stop offset="1" stop-color="#21877c"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#e8e3ff"/>
+    </marker>
+    <filter id="shadow" x="-10%" y="-10%" width="130%" height="140%">
+      <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <rect width="1100" height="360" rx="18" fill="url(#bg)"/>
+
+  <!-- arrows (drawn first so boxes sit on top) -->
+  <g fill="none" stroke="#e8e3ff" stroke-width="2.5" stroke-linecap="round" marker-end="url(#arrow)">
+    <path d="M200,72 C236,72 222,164 257,164"/>
+    <path d="M200,180 L258,180"/>
+    <path d="M200,288 C236,288 222,196 257,196"/>
+    <path d="M430,180 L468,180"/>
+    <path d="M640,180 L678,180"/>
+    <path d="M850,170 C874,170 862,118 887,118"/>
+    <path d="M850,190 C874,190 862,268 887,268"/>
+    <path d="M850,48 C930,48 960,40 962,69" stroke-dasharray="6 5"/>
+  </g>
+
+  <!-- edge labels -->
+  <g font-size="13" fill="#cfc8f5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle">
+    <text x="659" y="168">ELF</text>
+    <text x="912" y="172">.dol ↑</text>
+    <text x="912" y="216">.dol ↓</text>
+  </g>
+
+  <!-- inputs -->
+  <g filter="url(#shadow)">
+    <rect x="30" y="40" width="170" height="64" rx="12" fill="url(#rust)"/>
+    <rect x="30" y="148" width="170" height="64" rx="12" fill="url(#rust)"/>
+    <rect x="30" y="256" width="170" height="64" rx="12" fill="url(#rust)"/>
+    <!-- toolchain -->
+    <rect x="260" y="148" width="170" height="64" rx="12" fill="url(#tool)"/>
+    <rect x="470" y="148" width="170" height="64" rx="12" fill="url(#tool)"/>
+    <rect x="680" y="148" width="170" height="64" rx="12" fill="url(#tool)"/>
+    <rect x="680" y="30" width="170" height="60" rx="12" fill="url(#tool)" opacity="0.85"/>
+    <!-- outputs -->
+    <rect x="890" y="72" width="180" height="76" rx="12" fill="url(#out)"/>
+    <rect x="890" y="232" width="180" height="72" rx="12" fill="url(#out)"/>
+  </g>
+
+  <g fill="#ffffff" text-anchor="middle">
+    <g font-size="17" font-weight="700">
+      <text x="115" y="69">your Rust app</text>
+      <text x="115" y="177">gc-std</text>
+      <text x="115" y="285">core + alloc</text>
+      <text x="345" y="177">rustc</text>
+      <text x="555" y="177">rust-lld</text>
+      <text x="765" y="177">gc-dol</text>
+      <text x="765" y="57">gc-bnr</text>
+      <text x="980" y="104">GameCube</text>
+      <text x="980" y="262">gc-iso</text>
+    </g>
+    <g font-size="12.5" fill="#fff4e8" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+      <text x="115" y="90">#![no_std] + alloc</text>
+      <text x="115" y="198">crt0 + drivers</text>
+      <text x="115" y="306">built from source</text>
+    </g>
+    <g font-size="12.5" fill="#ece8ff" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+      <text x="345" y="198">gekko-none-eabi</text>
+      <text x="555" y="198">memory.x.ld</text>
+      <text x="765" y="198">ELF → DOL</text>
+      <text x="765" y="77">opening.bnr</text>
+    </g>
+    <g font-size="12.5" fill="#e6fffb">
+      <text x="980" y="124">via Swiss · or Dolphin</text>
+      <text x="980" y="282">bootable .iso</text>
+    </g>
+  </g>
+
+  <!-- column captions -->
+  <g font-size="12" fill="#9d93c9" text-anchor="middle" letter-spacing="1.5">
+    <text x="115" y="345">YOUR CODE</text>
+    <text x="555" y="345">PURE-RUST TOOLCHAIN</text>
+    <text x="980" y="345">RUNS ON</text>
+  </g>
+</svg>
