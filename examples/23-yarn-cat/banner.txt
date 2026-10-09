@@ -2,4 +2,4 @@ Yarn Cat
 gc-rust
 Yarn Cat - a kitten in your TV
 gc-rust (pure Rust GameCube)
-An orange kitten chases a ball of yarn.\nA: toss yarn  Stick: nudge  START: exit
+An orange kitten chases a ball of yarn.\nStick: walk  A: swat  B: toss yarn  (idle = screensaver)

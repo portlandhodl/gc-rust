@@ -104,7 +104,7 @@ bootable GCM disc image with our own Rust apploader.
 | 20 | `threads` | Preemptive background agent thread |
 | 21 | `thread-sync` | Channels, mutexes, wait-queues |
 | 22 | `net-echo` | BBA Ethernet: ARP + ICMP ping |
-| 23 | **`yarn-cat`** 🐱 | **The kitten.** Flat-shaded GX room, chase / crouch / wiggle / swat AI, a spring-driven spine (A tosses the yarn, the stick nudges it) |
+| 23 | **`yarn-cat`** 🐱 | **The kitten.** Flat-shaded GX room, chase / crouch / wiggle / swat AI, a spring-driven spine. Grab the controller to play: stick walks, A swats, B tosses the yarn — let go and it's a screensaver again |
 | 24 | `gx-diag` | GX test card — 2D, depth test and culling in four quadrants |
 | 25 | `gx-selftest` | Draws, reads the EFB back, prints PASS/FAIL on screen |
 
