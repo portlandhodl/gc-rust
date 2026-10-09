@@ -1,135 +1,119 @@
-# gc-rust
+<div align="center">
 
-**Write Nintendo GameCube homebrew in 100% pure Rust — no devkitPro, no libogc, no C toolchain needed.**
+# 🦀 gc-rust 🎮
+
+### GameCube homebrew in 100% pure Rust — no devkitPro, no libogc, no C toolchain.
+
+[![Rust nightly](https://img.shields.io/badge/rust-nightly-orange?logo=rust)](https://rustup.rs)
+[![Target](https://img.shields.io/badge/target-powerpc--gekko--none--eabi-6a5acd)](powerpc-gekko-none-eabi.json)
+[![C code](https://img.shields.io/badge/C%20code-0%20lines-brightgreen)](#-is-it-really-pure-rust)
+[![Runs on](https://img.shields.io/badge/runs%20on-real%20GameCube%20%2B%20Dolphin-purple)](#-on-a-real-gamecube)
+[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#-license)
 
 ![yarn-cat: a low-poly orange kitten batting a ball of yarn inside a retro TV](docs/yarn-cat.png)
 
-*`yarn-cat` (example 23): a low-poly kitten that lives inside your TV and
-plays with a ball of yarn — GX-rendered, flat-shaded, running on a real
-GameCube. `make sd EXAMPLE=yarn-cat` builds a Swiss-ready SD folder with a
-banner.*
+*Meet **yarn-cat** — a low-poly kitten who lives inside your TV and will not
+stop batting that ball of yarn. GX-rendered, spring-animated, written in Rust,
+running on a real GameCube.*
 
-`gc-rust` is a self-hosted Rust target (`powerpc-gekko-none-eabi`) for the GameCube's Gekko CPU (big-endian PowerPC 750CXe). rustc compiles your code, `rust-lld` links it against a memory map we ship (`memory.x.ld`), and a tiny pure-Rust `gc-dol` tool packs the ELF into a bootable `.dol`.
+**⭐ If this made you smile, please [star the repo](https://github.com/portlandhodl/gc-rust) — it helps other
+homebrew folks find it!**
 
-The platform library, `gc-std`, is written in Rust (with one startup assembly block and MMIO register constants ported from the public-domain-ish libogc register documentation/Dolphin emulator):
+</div>
+
+---
+
+`rustc` compiles your code for the GameCube's Gekko CPU (a big-endian
+PowerPC 750CXe), `rust-lld` links it against a memory map we ship, and a
+tiny pure-Rust tool packs it into a bootable `.dol`. That's the whole
+toolchain.
 
 ```
-┌──────────────┐    ┌──────────────────┐    ┌──────────┐    ┌────────┐
-│ your Rust app │──▶ │ gc-std (pure Rust)│──▶ │ rust-lld │──▶ │ gc-dol │──▶ .dol
-│  (#![no_std]) │    │  crt0 + drivers  │    └──────────┘    └────────┘
-└──────────────┘    └──────────────────┘
+┌───────────────┐    ┌───────────────────┐    ┌──────────┐    ┌────────┐
+│ your Rust app │──▶ │ gc-std (pure Rust)│──▶ │ rust-lld │──▶ │ gc-dol │──▶ 🎮 .dol
+│  (#![no_std]) │    │  crt0 + drivers   │    └──────────┘    └────────┘
+└───────────────┘    └───────────────────┘
 ```
 
-Only requirement: **a nightly Rust toolchain** (`rustup toolchain install nightly --component rust-src`).
-
-Nothing else. No devkitPro, no gcc, no libogc, no elf2dol.
-
-## What's in the box
-
-* `core` + `alloc` via `-Zbuild-std` — `Vec`, `String`, `Box`, `format!`, `BTreeMap`… all work on the console.
-* HV bring-up in Rust (`crt0.rs`): BATs, caches, FPU + paired-singles, stack, bss zeroing.
-* **Interrupts & exceptions**: PI interrupt controller, exception vector trampolines, per-source handlers, `irq::IrqLock` critical sections.
-* Video (VI) driver: NTSC/PAL/MPAL/EURGB60, 480i IntDf and 480p progressive, YUY2 4:2:2 XFB, retrace polling.
-* **GX** driver: viewport/scissor, immediate-mode vertex streams through the write-gather pipe, projection/model matrix loads, TEV setup, depth buffer, EFB→XFB copy.
-* **Polyphonic audio** (`aesnd`): up to 32 voices mixed on the console's DSP by the libaesnd-compatible mixer microcode (`dspcode.rs`), staged through ARAM, with per-voice volume/pitch/loop and stream-refill callbacks.
-* **Audio** (simple path): stereo 16-bit PCM @ 48 kHz straight through the AI DMA engine (interrupt-driven buffer refill, `audio::on_refill` callback) — for when you just need a beep.
-* Controller (SI) driver: buttons, held state, analog sticks, analog triggers, origin calibration (cmd `0x41`), hot-plug detect.
-* **Preemptive threads** (`lwp`): background agents with `sleep_ms` / `yield_now` / `join` — one Gekko core, sliced by the decrementer.
-* **Memory cards** (`card`): the `CARD_*` save-game filesystem (mount/verify/create/read/write/delete/dir-walk), ported 1:1 from libogc, exercised host-side against a card-image emulator.
-* **EXI bus** (`exi`) with libogc-shaped sync API, plus USB Gecko debug output and system SRAM settings access (`sram`).
-* **SD Gecko** (`sd`): SD/SDHC block reads & writes over SPI; **`fat`** gives a read-only FAT16/FAT32 layer (list dir, read files) for media-grade storage.
-* **ADPCM decode** (`adpcm`): GC DSP-ADPCM → PCM s16 for stock audio assets, usable with `aesnd` voices.
-* **BBA networking** (`bba` + `net`): the Ethernet MAC driver plus a purpose-built mini IP stack (ARP, ICMP ping, UDP) for background "agent" threads.
-* `gu` matrix math (perspective, look-at, concat, rotation…) in pure Rust.
-* Font-based text console on the framebuffer (`print!`/`println!`).
-* **Framebuffer double-buffering** — a two-slot VI flip chain (`video.flip()`; the GX `end_frame()` flips automatically).
-* A best-fit, byte-exact free-list heap allocator on MEM1.
-* ARAM streaming-block driver (sync DMA) if you want to study DMA into the DSP.
-
-## Build
+## ⚡ Quick start
 
 ```bash
 rustup toolchain install nightly --component rust-src
-make                       # all examples -> dist/*.dol (header-validated)
-make list                  # print example names
-make gx-cube               # just one
+git clone https://github.com/portlandhodl/gc-rust && cd gc-rust
+make                       # every example -> dist/*.dol (header-validated)
+make sd EXAMPLE=yarn-cat   # Swiss-ready SD folder with a banner
 ```
 
-## Test
+That's it. No devkitPro, no gcc, no libogc, no elf2dol.
 
-```bash
-make check    # packer unit tests (incl. synthetic ELF + every dist/*.dol),
-              # host-side math tests (mtx/perspective/rotations), and a
-              # headless Dolphin smoke boot of every dist/*.dol.
-```
+## 🎮 On a real GameCube
 
-The Dolphin smoke tests use a source build of Dolphin (nogui) at
-`~/git/dolphin/build-x86_64-release/Binaries/dolphin-emu-nogui` (override
-with `DOLPHIN_NOGUI=...`); they are skipped with code 77 when it's absent:
+1. `make sd EXAMPLE=yarn-cat`
+2. Copy `dist/sd/yarn-cat/` onto your SD card (SD2SP2, SD Gecko, …).
+3. Boot **Swiss** — the folder shows up as one entry with its own banner,
+   title and description (built by `tools/gc-bnr`).
 
-```bash
-cmake -G Ninja -B build-x86_64-release \
-  -DENABLE_QT=OFF -DENABLE_NOGUI=ON -DENABLE_TESTS=OFF \
-  -DENABLE_VULKAN=OFF -DENABLE_LLVM=OFF
-ninja -C build-x86_64-release dolphin-emu-nogui
-ln -s ../../Data/Sys build-x86_64-release/Binaries/Sys   # uninstalled build needs its data
-```
+Any other `dist/*.dol` works too: drop it on the card and load it from Swiss
+(or any GC homebrew loader). `make iso EXAMPLE=dvd-read` even builds a
+bootable GCM disc image with our own Rust apploader.
 
-Then, in a window:
+> 💡 **Hardware honesty:** Dolphin is wonderfully forgiving — cache
+> coherency, the GX fixed-point rasterizer's range, the `zcomploc`
+> copy-clear quirk, alignment exceptions… `gc-rust` has been fixed against
+> all of those *on real hardware*, and `gx-diag` / `gx-selftest` exist so
+> you can check a console in one photo.
 
-```bash
-make run EXAMPLE=yarn-cat
-```
+## 🧰 What's in the box
 
-Dolphin is forgiving where real hardware isn't (cache coherency, GX
-fixed-point rasterizer range, the zcomploc copy-clear quirk, alignment
-exceptions…): verify on a console before trusting a GX change.
+| | |
+|---|---|
+| 🧠 **Rust for real** | `core` + `alloc` via `-Zbuild-std` — `Vec`, `String`, `Box`, `format!`, `BTreeMap` all work on the console |
+| 🚀 **Bring-up** | `crt0.rs`: real-mode BATs, caches, FPU + paired singles, stack, BSS — then `main()` |
+| 🖼️ **GX 3D** | command FIFO, immediate-mode vertices, matrices, TEV, depth, culling, EFB→XFB copy, EFB peeks |
+| 📺 **Video** | NTSC / PAL / MPAL / EURGB60, 480i + 480p, YUY2 XFB, double-buffered flip chain |
+| 🔊 **Audio** | 32-voice DSP mixer (`aesnd`) through ARAM, plus a simple 48 kHz PCM path; DSP-ADPCM decode |
+| 🕹️ **Input** | buttons, sticks, triggers, origin calibration, hot-plug |
+| 🧵 **Threads** | preemptive LWP threads, mutexes, channels, wait-queues |
+| 💾 **Storage** | memory cards (`CARD_*` filesystem), SD/SDHC over SPI + FAT16/32, DVD drive reads |
+| 🌐 **Network** | BBA Ethernet + a tiny IP stack (ARP, ICMP ping, UDP) |
+| 🛠️ **Tools** | `gc-dol` (ELF→DOL), `gc-iso` (bootable GCM), `gc-bnr` (Swiss/IPL banners) — all Rust |
+| 🧮 **Extras** | `gu` matrix math, text console (`println!`), interrupts, a byte-exact heap |
 
-On hardware: copy the `.dol` onto an SD card and load it with Swiss (or any other GC homebrew loader), e.g. via SD2SP2, BBA, or a memory-card exploit.
+## 🐾 Examples
 
-## Examples
+`make <name>` builds one; `make run EXAMPLE=<name>` opens it in Dolphin.
 
-| # | name | shows |
-|---|------------------|----------------------------------------------------------|
-| 01 | `hello-console`     | Text console, `println!`, button polling                 |
-| 02 | `pad-input`         | Buttons, held state, analog sticks, analog triggers      |
-| 03 | `heap-strings`      | `Vec`, `String`, `BTreeMap`, `Box`, `format!`, iterative fib |
-| 04 | `video-info`        | Querying the detected video mode                         |
-| 05 | `pixel-plasma`      | Software-rendered plasma straight into the YUY2 XFB     |
-| 06 | `gx-clear`          | GX bring-up, clear-color animation                       |
-| 07 | `gx-triangle`       | Immediate-mode colored triangle                          |
-| 08 | `gx-cube`           | Depth-tested colored cube                                |
-| 09 | `gx-textured-cube`  | Procedural RGB565 texture + 4×4 swizzle + clamping       |
-| 10 | `gx-lit-cube`       | Per-vertex lit cube (normals × light dir)                |
-| 11 | `irq-timer`         | VI retrace via PI interrupt handler (no polling)        |
-| 12 | `pad-calibrated`    | Pad origin calibration + hot-plug detect                |
-| 13 | `audio-beep`        | Stereo PCM out via AI DMA at 48 kHz, interrupt-refilled |
-| 14 | `dsp-mixer`         | AESND polyphony: chord loop + accents mixed on the DSP |
-| 15 | `exi-sram`           | EXI bus driver + system SRAM/settings readout          |
-| 16 | `memcard`            | Save files on a real GC memory card (CARD driver, host-tested) |
-| 17 | `usb-gecko`          | USB Gecko debug-channel output (host over TCP under Dolphin) |
-| 18 | `sd-file`            | SD Gecko: FAT32 mount, dir listing, file read                |
-| 19 | `dvd-read`           | DI drive reads; boots as a full bootable ISO (`make iso`)    |
-| 20 | `threads`            | Preemptive LWP: background agent with sleeps + foreground loop |
-| 21 | `thread-sync`        | LWP Channel/Mutex/WaitQueue: game pushes jobs onto a parked agent |
-| 22 | `net-echo`           | BBA ethernet: probe, bring-up, ARP gateway, ICMP ping          |
-| 23 | `yarn-cat`           | Low-poly kitten chasing yarn in a TV room: flat-shaded GX scene, springy animation (A tosses, stick nudges) |
-| 24 | `gx-diag`            | GX test card: 2D, depth test, culling per quadrant — photograph it on hardware |
-| 25 | `gx-selftest`        | GX self-test: draws, reads the EFB back, prints PASS/FAIL on the console |
+| # | name | what it shows |
+|---|------|---------------|
+| 01 | `hello-console` | Text console, `println!`, button polling |
+| 02 | `pad-input` | Buttons, held state, analog sticks, triggers |
+| 03 | `heap-strings` | `Vec`, `String`, `BTreeMap`, `Box`, `format!` |
+| 04 | `video-info` | The detected video mode |
+| 05 | `pixel-plasma` | Software-rendered plasma straight into the YUY2 framebuffer |
+| 06 | `gx-clear` | GX bring-up, pulsing clear colour |
+| 07 | `gx-triangle` | Immediate-mode rainbow triangle |
+| 08 | `gx-cube` | Depth-tested spinning cube |
+| 09 | `gx-textured-cube` | Procedural RGB565 texture, 4×4 tile swizzle |
+| 10 | `gx-lit-cube` | Per-vertex lighting |
+| 11 | `irq-timer` | VI retrace through the PI interrupt handler |
+| 12 | `pad-calibrated` | Origin calibration + hot-plug |
+| 13 | `audio-beep` | 48 kHz PCM via AI DMA |
+| 14 | `dsp-mixer` | Polyphonic chords mixed on the DSP |
+| 15 | `exi-sram` | EXI bus + system SRAM settings |
+| 16 | `memcard` | Save files on a real memory card |
+| 17 | `usb-gecko` | USB Gecko debug output |
+| 18 | `sd-file` | SD Gecko: FAT32 mount, list, read |
+| 19 | `dvd-read` | DVD drive reads; boots as a full ISO (`make iso`) |
+| 20 | `threads` | Preemptive background agent thread |
+| 21 | `thread-sync` | Channels, mutexes, wait-queues |
+| 22 | `net-echo` | BBA Ethernet: ARP + ICMP ping |
+| 23 | **`yarn-cat`** 🐱 | **The kitten.** Flat-shaded GX room, chase / crouch / wiggle / swat AI, a spring-driven spine (A tosses the yarn, the stick nudges it) |
+| 24 | `gx-diag` | GX test card — 2D, depth test and culling in four quadrants |
+| 25 | `gx-selftest` | Draws, reads the EFB back, prints PASS/FAIL on screen |
 
-### Running on a GameCube with Swiss
+## ✍️ Write your own
 
-`make sd EXAMPLE=yarn-cat` writes `dist/sd/yarn-cat/` containing
-`default.dol` + `opening.bnr`. Copy that folder to the SD card; Swiss
-lists it as one entry with the banner image, title and description
-(`tools/gc-bnr` builds the BNR1 banner from `examples/NN-<name>/banner.ppm`
-+ `banner.txt`).
-
-Every resulting `.dol` contains Rust + hardware glue only. No C, no assembly libraries, zero non-Rust code.
-
-## Writing your own program
-
-Make a new workspace member under `examples/`, copy the minimal skeleton from `01-hello-console`:
+Make `examples/NN-mycoolgame/` (package name `mycoolgame`) and start from:
 
 ```rust
 #![no_std]
@@ -140,46 +124,84 @@ use gc_std::{println, input::button};
 extern "C" fn main() -> i32 {
     let mut gc = gc_std::init();
     gc.enable_console();
-    println!("Hello GameCube");
-    loop {}
+    println!("Hello GameCube 👋");
+    loop {
+        gc_std::video::wait_vsync();
+        gc_std::input::scan();
+        if gc_std::input::buttons_down(0).contains(button::START) {
+            gc_std::system::exit(0);
+        }
+    }
 }
 ```
 
-Your crate's name must match its directory name base (`examples/NN-mycoolgame` → package `mycoolgame`), then `make mycoolgame` works.
+Then `make mycoolgame`. For 3D, start from `08-gx-cube` or `23-yarn-cat`.
+Want ideas? **[AGENTS.md](AGENTS.md)** has a list of things to build and
+ways to contribute — for humans and coding agents alike.
 
-## How it works
+## 🧪 Testing
+
+```bash
+make check   # gc-dol + gc-bnr unit tests, host tests (matrix math, heap,
+             # emulated memory card + SD/FAT32), and a headless Dolphin
+             # boot of every dist/*.dol
+```
+
+The Dolphin smoke tests use a source build of Dolphin (nogui) at
+`~/git/dolphin/build-x86_64-release/Binaries/dolphin-emu-nogui` (override
+with `DOLPHIN_NOGUI=...`); they're skipped when it's absent:
+
+```bash
+cmake -G Ninja -B build-x86_64-release \
+  -DENABLE_QT=OFF -DENABLE_NOGUI=ON -DENABLE_TESTS=OFF \
+  -DENABLE_VULKAN=OFF -DENABLE_LLVM=OFF
+ninja -C build-x86_64-release dolphin-emu-nogui
+ln -s ../../Data/Sys build-x86_64-release/Binaries/Sys   # uninstalled build needs its data
+```
+
+## 🔍 How it works
 
 | piece | notes |
 |-------|-------|
-| `powerpc-gekko-none-eabi.json` | custom rustc target: big-endian, +FPU (`750`), static reloc model, panic=abort, `rust-lld` linker driver |
-| `crates/gc-std/src/crt0.rs` | `_start`: real-mode BAT/HID0/L2/FPSCR setup then MMU back on; clear `.bss`; call `main()` |
-| `crates/gc-std/src/hw.rs` | MMIO read/write + write-gather pipe helpers, YAGCD register addresses |
-| `crates/gc-std/src/video.rs` | VI driver: timing tables (NTSC/PAL/MPAL/EURGB60 + 480p), framebuffer setup, vsync, flip chain |
-| `crates/gc-std/src/aesnd.rs` | DSP-mixer voices: PB structs, `0xface*` mail protocol, AI DMA pacing (libaesnd port) |
-| `crates/gc-std/src/dvd.rs` | DI drive: disc ID, inquiry, raw reads (libogc `DVD_Low*` port) |
-| `crates/gc-std/src/lwp.rs` | Threading: DEC-vector preemption, full PPCContext per TCB (spawn/sleep/yield/join) |
-| `tools/gc-iso` | Bootable GCM packer (+ a tiny Rust apploader payload in `crates/apploader`) |
-
-## Bootable ISOs
-
-`make iso EXAMPLE=dvd-read` produces `dist/dvd-read.iso`: a valid GCM
-image with boot.bin + bi2 + FST + our own Rust apploader. It boots in
-Dolphin and on real hardware (Swiss / datel loaders). Any extra files
-packed (see `Makefile` `--file` entries) sit at fixed LBAs; `dvd-read`
-shows reading them back with the pure-Rust DI (`dv`), then proves the
-roundtrip to testers via the observation mailbox (`observe.rs` +
-MemoryWatcher).
+| `powerpc-gekko-none-eabi.json` | custom rustc target: big-endian, +FPU (`750`), static relocs, panic=abort, `rust-lld` |
+| `memory.x.ld` | MEM1 layout: entry at `0x80003100`, framebuffers + stack at the top of 24 MiB |
+| `crates/gc-std/src/crt0.rs` | `_start`: real-mode BAT/HID0/L2/FPSCR setup, back to virtual mode, clear `.bss`, call `main()` |
+| `crates/gc-std/src/hw.rs` | MMIO + write-gather pipe helpers, cache ops, timebase |
+| `crates/gc-std/src/video.rs` | VI timings (NTSC/PAL/MPAL/EURGB60 + 480p), framebuffers, vsync, flip chain |
+| `crates/gc-std/src/gx.rs` | GX register shadows, BP/CP/XF writers, command FIFO, pipeline + diagnostics |
+| `crates/gc-std/src/gu.rs` | matrix math in pure Rust (Cephes-style scalar libm included) |
 | `crates/gc-std/src/irq.rs` | PI interrupt controller, exception trampolines, per-source handlers |
-| `crates/gc-std/src/input.rs` | SI `0x4003` polling with origin calibration + hot-plug detect |
-| `crates/gc-std/src/gx.rs` | GX register shadowing + BP/CP/XF command writers + pipeline helpers |
-| `crates/gc-std/src/gu.rs` | All matrix math in pure Rust (Cephes-style scalar libm included) |
-| `tools/gc-dol` | host-side ELF→DOL packer in pure Rust |
-| `memory.x.ld` | minimal MEM1 layout (0x80003100 entry, 24 MiB) |
+| `crates/gc-std/src/input.rs` | SI polling with origin calibration + hot-plug |
+| `crates/gc-std/src/aesnd.rs` | DSP-mixer voices: parameter blocks, `0xface*` mail protocol (libaesnd port) |
+| `crates/gc-std/src/dvd.rs` | DI drive: disc ID, inquiry, raw reads (libogc `DVD_Low*` port) |
+| `crates/gc-std/src/lwp.rs` | threads: decrementer preemption, full CPU context per thread |
+| `tools/gc-dol` · `tools/gc-iso` · `tools/gc-bnr` | ELF→DOL packer, bootable GCM builder (+ Rust apploader), banner builder |
 
-## License
+### 🦀 Is it really pure Rust?
+
+Yes — no `.c`/`.cpp`/`.S` files, no `build.rs`, no `cc`/`bindgen`, every
+crate in `Cargo.lock` is ours, and `core`/`alloc`/`compiler_builtins` are
+built from Rust source. A few unavoidable spots use PowerPC instructions via
+Rust's `asm!` (boot, exception entry, cache ops, special registers), exactly
+where any GameCube library needs assembly. Much of `gc-std` is a careful Rust
+port of libogc's *logic* (hardware quirks included), and `dspcode.rs` embeds
+the audio DSP's microcode as bytes.
+
+## 🤝 Contributing
+
+New drivers, examples, bug reports from real consoles, docs — all welcome!
+See **[AGENTS.md](AGENTS.md)** for ideas, the conventions, and the checklist
+(run `make check`, and test GX changes on hardware when you can).
+
+## 📜 License
 
 MIT OR Apache-2.0 (see `LICENSE-MIT` / `LICENSE-APACHE`).
 
-Hardware register semantics and bit encodings follow libogc (zlib-style
-public-domain documentation of the GameCube) and Dolphin's source. No libogc
-code or binaries are linked.
+Hardware register semantics and bit encodings follow libogc and Dolphin's
+source. No libogc code or binaries are linked.
+
+<div align="center">
+
+**Made with 🦀 and 🧶 — if you enjoyed it, a ⭐ on [GitHub](https://github.com/portlandhodl/gc-rust) means a lot!**
+
+</div>

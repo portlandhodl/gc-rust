@@ -76,6 +76,13 @@ fn clampf(x: f32, lo: f32, hi: f32) -> f32 {
         x
     }
 }
+fn max0(x: f32) -> f32 {
+    if x > 0.0 {
+        x
+    } else {
+        0.0
+    }
+}
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
 }
@@ -489,6 +496,12 @@ impl Spring {
 }
 
 const TAIL_SEGS: usize = 7;
+/// Spine joints from shoulders (0) to hips (SPINE - 1).
+const SPINE: usize = 4;
+/// Distance between spine joints along the back.
+const SPINE_SEG: f32 = 0.15;
+/// How far neighbouring vertebrae may bend relative to each other (deg).
+const SPINE_MAX_BEND: f32 = 30.0;
 
 struct Cat {
     x: f32,
@@ -509,12 +522,18 @@ struct Cat {
     paw: f32,
     /// forward lunge of the chest during a swat
     lunge: f32,
+    /// pre-pounce butt-wiggle amplitude and phase; the shake starts at the
+    /// hips and travels up the spine, fading towards the shoulders
     wiggle: f32,
+    wiggle_t: f32,
     head_yaw: Spring,
     head_pitch: Spring,
     head_tilt: Spring,
-    /// spine bend (deg): chest leads into a turn, hips follow
-    bend: Spring,
+    /// World yaw (deg) of each spine joint, shoulders first. Joint 0 is
+    /// the heading; every joint behind chases the one in front of it, so
+    /// turns ripple down the back and the body curls into a C.
+    spine: [f32; SPINE],
+    spine_v: [f32; SPINE],
     /// body roll (deg): leans into turns
     lean: Spring,
     /// per-segment tail sway that lags the body (follow-through)
@@ -543,10 +562,12 @@ impl Cat {
             paw: 0.0,
             lunge: 0.0,
             wiggle: 0.0,
+            wiggle_t: 0.0,
             head_yaw: Spring::default(),
             head_pitch: Spring::default(),
             head_tilt: Spring::default(),
-            bend: Spring::default(),
+            spine: [heading; SPINE],
+            spine_v: [0.0; SPINE],
             lean: Spring::default(),
             tail: [Spring::default(); TAIL_SEGS],
             ear_perk: Spring::default(),
@@ -697,6 +718,49 @@ fn ease_in_out(t: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
+/// Spine dynamics. The shoulders (joint 0) take the heading; each joint
+/// behind springs towards the one in front of it (plus a small travelling
+/// wave while trotting), walking forward drags the rear into line like a
+/// follow-the-leader chain, and neighbouring joints can only bend so far.
+fn step_spine(cat: &mut Cat) {
+    cat.spine[0] = cat.heading;
+    for k in 1..SPINE {
+        let rel = wrap180(cat.spine[k - 1] - cat.spine[k]);
+        // a trotting cat's back sways side to side, phase-shifted per joint
+        let wave = sin(cat.walk_phase - k as f32 * 0.9) * 4.0 * cat.walk_amt;
+        cat.spine_v[k] += (rel - wave) * 0.16;
+        cat.spine_v[k] *= 1.0 - 0.36;
+        // moving forward pulls the hips round behind the shoulders
+        cat.spine_v[k] += rel * clampf(cat.speed * 5.0, 0.0, 0.25) * 0.5;
+        cat.spine[k] = wrap180(cat.spine[k] + cat.spine_v[k]);
+        let rel = wrap180(cat.spine[k - 1] - cat.spine[k]);
+        if absf(rel) > SPINE_MAX_BEND {
+            let lim = if rel > 0.0 { SPINE_MAX_BEND } else { -SPINE_MAX_BEND };
+            cat.spine[k] = wrap180(cat.spine[k - 1] - lim);
+            cat.spine_v[k] *= 0.5;
+        }
+    }
+}
+
+/// World positions of the spine joints: joint 0 sits over the shoulders,
+/// each following joint one segment behind along the mean of the two
+/// joints' directions (so the back forms a smooth arc).
+fn spine_nodes(cat: &Cat) -> [(f32, f32); SPINE] {
+    let dir = |deg: f32| {
+        let r = deg * (PI / 180.0);
+        (sin(r), cos(r))
+    };
+    let (fx, fz) = dir(cat.spine[0]);
+    let lead = 0.24 + cat.lunge;
+    let mut nodes = [(cat.x + fx * lead, cat.z + fz * lead); SPINE];
+    for k in 1..SPINE {
+        let mid = cat.spine[k] + wrap180(cat.spine[k - 1] - cat.spine[k]) * 0.5;
+        let (dx, dz) = dir(mid);
+        nodes[k] = (nodes[k - 1].0 - dx * SPINE_SEG, nodes[k - 1].1 - dz * SPINE_SEG);
+    }
+    nodes
+}
+
 fn step_cat(cat: &mut Cat, ball: &mut Ball, rng: &mut Rng, hearts: &mut [Heart; 4]) {
     let (dx, dz) = (ball.x - cat.x, ball.z - cat.z);
     let dist = sqrt(dx * dx + dz * dz);
@@ -717,7 +781,7 @@ fn step_cat(cat: &mut Cat, ball: &mut Ball, rng: &mut Rng, hearts: &mut [Heart; 
 
     match cat.state {
         State::Chase => {
-            max_turn = 5.5;
+            max_turn = 9.0;
             const REACH: f32 = 0.78;
             if dist > REACH {
                 let cap = if dist > 2.0 { 0.045 } else { 0.03 };
@@ -744,16 +808,16 @@ fn step_cat(cat: &mut Cat, ball: &mut Ball, rng: &mut Rng, hearts: &mut [Heart; 
             }
         }
         State::Crouch => {
-            max_turn = 1.5;
+            max_turn = 2.5;
             target_crouch = 1.0;
             target_yaw = clampf(diff, -20.0, 20.0);
             target_pitch = 14.0;
             target_perk = 1.0;
             // the butt wiggle builds up before the pounce
             if cat.timer > 18 {
-                let amp = clampf((cat.timer as f32 - 18.0) / 20.0, 0.0, 1.0) * 0.04;
-                cat.wiggle = sin(cat.timer as f32 * 0.85) * amp;
+                cat.wiggle = clampf((cat.timer as f32 - 18.0) / 20.0, 0.0, 1.0) * 0.07;
             }
+            cat.wiggle_t += 0.8;
             if dist > 1.1 {
                 cat.state = State::Chase;
                 cat.timer = 0;
@@ -814,7 +878,7 @@ fn step_cat(cat: &mut Cat, ball: &mut Ball, rng: &mut Rng, hearts: &mut [Heart; 
             }
         }
         State::Watch => {
-            max_turn = 1.2;
+            max_turn = 2.0;
             target_sit = 1.0;
             target_yaw = clampf(diff, -60.0, 60.0);
             target_tilt = sin(cat.timer as f32 * 0.035) * 14.0;
@@ -834,11 +898,11 @@ fn step_cat(cat: &mut Cat, ball: &mut Ball, rng: &mut Rng, hearts: &mut [Heart; 
 
     // turning: ease the turn rate in and out instead of snapping a fixed
     // angle per frame; slow down while turning hard
-    let want_turn = clampf(diff * 0.15, -max_turn, max_turn);
-    cat.turn += (want_turn - cat.turn) * 0.18;
+    let want_turn = clampf(diff * 0.22, -max_turn, max_turn);
+    cat.turn += (want_turn - cat.turn) * 0.3;
     cat.heading = wrap180(cat.heading + cat.turn);
-    let turn_slow = 1.0 - clampf(absf(cat.turn) / 7.0, 0.0, 0.6);
-    cat.speed += (target_speed * turn_slow - cat.speed) * 0.08;
+    let turn_slow = 1.0 - clampf(absf(cat.turn) / 12.0, 0.0, 0.55);
+    cat.speed += (target_speed * turn_slow - cat.speed) * 0.12;
 
     let h = cat.heading * (PI / 180.0);
     let (fx, fz) = (sin(h), cos(h));
@@ -867,16 +931,16 @@ fn step_cat(cat: &mut Cat, ball: &mut Ball, rng: &mut Rng, hearts: &mut [Heart; 
     // springs: a little overshoot everywhere reads as weight and life
     cat.crouch.go(target_crouch, 0.06, 0.3);
     cat.sit.go(target_sit, 0.04, 0.28);
-    cat.head_yaw.go(target_yaw, 0.09, 0.32);
+    cat.head_yaw.go(target_yaw, 0.16, 0.38);
     cat.head_pitch.go(target_pitch, 0.07, 0.3);
     cat.head_tilt.go(target_tilt, 0.05, 0.3);
     cat.ear_perk.go(target_perk, 0.1, 0.3);
-    // the chest leads into a turn and the hips follow; the body leans in
-    cat.bend.go(clampf(cat.turn * 5.0, -24.0, 24.0), 0.1, 0.35);
-    cat.lean.go(clampf(-cat.turn * 1.6, -8.0, 8.0), 0.08, 0.3);
-    // tail follow-through: the base swings opposite to the turn and every
-    // segment chases the one before it, so the motion travels to the tip
-    let base = -cat.bend.x * 1.4 - cat.turn * 2.5;
+    cat.lean.go(clampf(-cat.turn * 1.2, -9.0, 9.0), 0.1, 0.32);
+    step_spine(cat);
+    // tail follow-through: the base swings opposite to the spine's curl and
+    // every segment chases the one before it, so the motion reaches the tip
+    let curl = wrap180(cat.spine[0] - cat.spine[SPINE - 1]);
+    let base = -curl * 0.7 - cat.turn * 2.0;
     for i in 0..TAIL_SEGS {
         let target = if i == 0 { base } else { cat.tail[i - 1].x * 0.9 };
         cat.tail[i].go(target, 0.14, 0.24);
@@ -1044,7 +1108,6 @@ fn draw_ball(b: &mut Batch, ball: &Ball, trail: &Trail) {
 }
 
 fn draw_cat(b: &mut Batch, cat: &Cat, frame: u32) {
-    let root = chain(&[t(cat.x, 0.0, cat.z), ry(cat.heading)]);
     let (cr, si) = (cat.crouch.x, cat.sit.x);
     let breathe = sin(frame as f32 * 0.06) * 0.008;
     let walk = cat.walk_amt;
@@ -1052,55 +1115,87 @@ fn draw_cat(b: &mut Batch, cat: &Cat, frame: u32) {
     // two footfalls per stride: the body bobs twice and sways once
     let bob = (absf(sin(ph)) - 0.5) * 0.035 * walk;
     let sway = sin(ph) * 3.0 * walk;
-    let bend = cat.bend.x;
+    let nodes = spine_nodes(cat);
+    let last = SPINE - 1;
 
-    // soft shadow
+    // soft shadow under the middle of the back
     if !diag("nodecal") {
-        floor_disc(b, &root, 12, 0.42, 0.66, 0.04, [96, 70, 60]);
+        let mid = chain(&[t(cat.x, 0.0, cat.z), ry(cat.spine[1])]);
+        floor_disc(b, &mid, 12, 0.42, 0.66, 0.04, [96, 70, 60]);
     }
 
-    // body: chest and hips are separate overlapping ellipsoids so the spine
-    // can bend (chest turns half the bend one way, hips the other)
-    let core = chain(&[
-        root,
-        t(0.0, 0.5 - cr * 0.13 - si * 0.04 + breathe + bob, -si * 0.05),
-        rz(cat.lean.x + sway),
-        rx(cr * 6.0 - si * 24.0),
-    ]);
-    let chest = chain(&[core, ry(bend * 0.5), t(0.0, 0.0, 0.13 + cat.lunge)]);
-    let hips = chain(&[core, t(cat.wiggle, 0.0, 0.0), ry(-bend * 0.5), t(0.0, 0.0, -0.13)]);
-    let fur = |i: usize, j: usize| {
-        let back = j >= 5;
-        let belly = (1..=3).contains(&j);
-        if back && i % 2 == 1 && i < 6 {
-            ORANGE_DARK
-        } else if belly && i > 0 && i < 6 {
-            CREAM
-        } else {
-            ORANGE
-        }
+    // Per-joint pose. u runs 0 (shoulders) .. 1 (hips): crouching drops the
+    // shoulders and lifts the hips, sitting does the opposite. The butt
+    // wiggle is a wave that starts at the hips and travels forward, fading
+    // out before the shoulders so the head stays locked on the yarn.
+    let mut height = [0.0f32; SPINE];
+    let mut shake = [0.0f32; SPINE];
+    let mut twist = [0.0f32; SPINE];
+    for k in 0..SPINE {
+        let u = k as f32 / last as f32;
+        height[k] = 0.5 + breathe + bob + cr * lerp(-0.16, -0.01, u) + si * lerp(0.06, -0.14, u);
+        let phase = cat.wiggle_t - (last - k) as f32 * 0.75;
+        let weight = u * u;
+        shake[k] = cat.wiggle * sin(phase) * weight;
+        twist[k] = cat.wiggle * cos(phase) * weight * 260.0;
+    }
+    // the frame of joint k: on the spine, turned to its yaw, leaning, and
+    // pitched to follow the back's slope between its neighbours
+    let joint = |k: usize| -> Mtx {
+        let (fwd, back) = (k.saturating_sub(1), (k + 1).min(last));
+        let run = SPINE_SEG * (back - fwd) as f32;
+        let pitch = atan2(height[fwd] - height[back], run) * (180.0 / PI);
+        chain(&[
+            t(nodes[k].0, height[k], nodes[k].1),
+            ry(cat.spine[k] + twist[k]),
+            t(shake[k], 0.0, 0.0),
+            rz(cat.lean.x + sway),
+            rx(-pitch),
+        ])
     };
-    sphere(b, &chain(&[chest, s(0.33, 0.3 + breathe, 0.33), rx(90.0)]), 10, 7, false, &fur);
-    sphere(b, &chain(&[hips, s(0.345, 0.31 + breathe, 0.33), rx(90.0)]), 10, 7, false, &fur);
 
-    // legs hang from the chest (front) or hips (back), in a trot: diagonal
-    // pairs move together; a paw lifts while its leg swings forward
-    let front_base = chain(&[root, ry(bend * 0.5), t(0.0, 0.0, cat.lunge)]);
-    let back_base = chain(&[root, t(cat.wiggle, 0.0, 0.0), ry(-bend * 0.5)]);
-    let legs: [(&Mtx, f32, f32, f32, f32, f32); 4] = [
-        // (frame, x, z, pivot height, gait phase offset, extra swing)
+    // body: one overlapping section per vertebra joint, so the back curves
+    // smoothly through turns instead of hinging
+    let radii: [(f32, f32); SPINE] = [(0.31, 0.29), (0.33, 0.3), (0.335, 0.305), (0.34, 0.31)];
+    for k in 0..SPINE {
+        let (rw, rh) = radii[k];
+        // long enough to overlap the neighbours well: one smooth back
+        let section = chain(&[joint(k), s(rw, rh + breathe, 0.24), rx(90.0)]);
+        sphere(b, &section, 10, 6, false, &|i, j| {
+            let back = j >= 5;
+            let belly = (1..=3).contains(&j);
+            if back && (i == 2 || i == 3) && k % 2 == 1 {
+                ORANGE_DARK
+            } else if belly && i > 0 && i < 5 {
+                CREAM
+            } else {
+                ORANGE
+            }
+        });
+    }
+
+    // legs hang from the shoulder and hip joints (upright, only turned and
+    // shaken with them), in a trot: diagonal pairs move together and a paw
+    // lifts while its leg swings forward. During the wiggle the back paws
+    // tread in place.
+    let leg_base = |k: usize| -> Mtx {
+        chain(&[t(nodes[k].0, 0.0, nodes[k].1), ry(cat.spine[k] + twist[k] * 0.5), t(shake[k], 0.0, 0.0)])
+    };
+    let (front_base, back_base) = (leg_base(0), leg_base(last));
+    let tread = cat.wiggle * 1.6;
+    let legs: [(&Mtx, f32, f32, f32, f32, f32, f32); 4] = [
+        // (frame, x, z, pivot height, gait phase offset, extra swing, tread)
         // the swat: +swing rotates the paw forward and up (the wind-up's
         // negative paw pulls it back first)
-        (&front_base, 0.16, 0.25, 0.44 - cr * 0.14 + si * 0.1, 0.0, cat.paw * 115.0),
-        (&front_base, -0.16, 0.25, 0.44 - cr * 0.14 + si * 0.1, PI, 0.0),
-        (&back_base, 0.16, -0.25, 0.44 - cr * 0.1 - si * 0.2, PI, si * 10.0),
-        (&back_base, -0.16, -0.25, 0.44 - cr * 0.1 - si * 0.2, 0.0, si * 10.0),
+        (&front_base, 0.16, 0.01, height[0] - 0.06, 0.0, cat.paw * 115.0, 0.0),
+        (&front_base, -0.16, 0.01, height[0] - 0.06, PI, 0.0, 0.0),
+        (&back_base, 0.16, -0.04, height[last] - 0.06, PI, si * 10.0, tread * max0(sin(cat.wiggle_t))),
+        (&back_base, -0.16, -0.04, height[last] - 0.06, 0.0, si * 10.0, tread * max0(-sin(cat.wiggle_t))),
     ];
-    for (n, &(base, lx, lz, py, off, extra)) in legs.iter().enumerate() {
+    for (n, &(base, lx, lz, py, off, extra, tread)) in legs.iter().enumerate() {
         let p = ph + off;
         let swing = sin(p) * 28.0 * walk + extra;
-        let lift = if cos(p) > 0.0 { cos(p) * 0.08 * walk } else { 0.0 };
-        let py = py + bob;
+        let lift = max0(cos(p)) * 0.08 * walk + tread;
         let len = py - lift;
         // the swatting paw also sweeps inwards, across in front of the face
         let sweep = if n == 0 { clampf(cat.paw, 0.0, 1.0) * 22.0 } else { 0.0 };
@@ -1111,13 +1206,14 @@ fn draw_cat(b: &mut Batch, cat: &Cat, frame: u32) {
         sphere1(b, &paw, 8, 4, CREAM);
     }
 
-    // tail: tapering segments curling up from the hips. Each segment adds
-    // its follow-through angle (cat.tail) plus an idle wave; when crouched
-    // only the tip twitches, fast.
+    // tail: tapering segments curling up from the hip joint, so the wiggle
+    // and the spine's curl carry straight into it. Each segment adds its
+    // follow-through angle (cat.tail) plus an idle wave; when crouched only
+    // the tip twitches, fast.
     let crouched = cat.state == State::Crouch;
     let mut tm = chain(&[
-        hips,
-        t(0.0, 0.06 - si * 0.32, -0.29 + si * 0.07),
+        joint(last),
+        t(0.0, 0.06 - si * 0.22, -0.18 + si * 0.07),
         rx(-58.0 - si * 30.0 - walk * 8.0 + cr * 18.0),
     ]);
     for i in 0..TAIL_SEGS {
@@ -1136,13 +1232,14 @@ fn draw_cat(b: &mut Batch, cat: &Cat, frame: u32) {
     }
     sphere1(b, &chain(&[tm, s(0.04, 0.04, 0.04)]), 6, 3, CREAM);
 
-    // head: rides on the chest, nods a little with each step, leads turns
+    // head: rides ahead of the shoulder joint, nods a little with each step
+    // and looks where it wants (head_yaw is relative to the shoulders)
     let nod = sin(ph * 2.0) * 2.5 * walk;
     let head = chain(&[
-        root,
-        ry(bend * 0.5),
-        t(0.0, 0.98 - cr * 0.26 + si * 0.12 + breathe + bob * 0.6, 0.45 - cr * 0.02 - si * 0.04 + cat.lunge * 1.4),
-        ry(cat.head_yaw.x),
+        t(nodes[0].0, 0.0, nodes[0].1),
+        ry(cat.spine[0]),
+        t(shake[0], 0.98 - cr * 0.26 + si * 0.12 + breathe + bob * 0.6, 0.21 - cr * 0.02 - si * 0.04 + cat.lunge * 0.4),
+        ry(cat.head_yaw.x - twist[0]),
         rz(cat.head_tilt.x + cat.lean.x * 0.5),
         rx(-si * 6.0 + cr * 6.0 + cat.head_pitch.x + nod),
     ]);
