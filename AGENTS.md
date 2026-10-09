@@ -133,3 +133,55 @@ via the in-tree `tools/gc-dol` host tool.
      instruction or invalid memory access = fail.
 - Run manually: `sh tests/dolphin-smoke.sh [names...]`,
   `RUN_SECS=<n>` overrides the 6s default.
+
+## Ways to use gc-rust
+
+Ideas for what to build (each one maps onto drivers that already exist):
+
+- **Games & toys** — start from `23-yarn-cat` (3D scene, AI, springy
+  animation) or `08-gx-cube` (bare 3D). A paddle game, a GX particle toy,
+  a tiny platformer, a virtual pet that saves to the memory card (`card`).
+- **Demoscene** — `05-pixel-plasma` (CPU → framebuffer) and the GX
+  examples; add music with the 32-voice DSP mixer (`aesnd`) or ADPCM.
+- **Hardware exploration / teaching** — every driver is small, commented
+  Rust; `gx-selftest` and `gx-diag` show how to verify a console.
+- **Tools on the console** — memory-card manager (`card`), SD file browser
+  (`sd` + `fat`), controller tester (`input`), network pinger (`bba` + `net`).
+- **Background "agents"** — preemptive threads (`lwp`) + channels
+  (`lwp_sync`) + UDP (`net`): a console that reports state to your PC,
+  takes remote commands, or streams logs over USB Gecko.
+- **Rust embedded learning** — a real `#![no_std]` target with `alloc`,
+  interrupts, DMA, cache coherency and a custom linker script.
+
+## Contributing
+
+Wanted (pick one, open a PR):
+
+- **GX**: textured meshes from files, lighting via the GX light objects,
+  display lists, indexed vertex arrays, alpha blending helpers, fog.
+- **Video**: 480p on component/HDMI adapters, VI interrupts for vsync
+  instead of polling, a GX-friendly overlay console (text over 3D).
+- **Audio**: a music/sequencer example on `aesnd`, streaming from SD.
+- **Storage**: FAT write support, DVD filesystem (FST) reader.
+- **Input**: rumble, GBA link cable, keyboard controller.
+- **Tooling**: a `cargo` subcommand/template for new projects, CI that
+  runs `make check`, PNG → banner conversion for `gc-bnr`.
+- **Docs**: walk-throughs of the GX pipeline and the boot path.
+
+Checklist for every change:
+
+1. `make check` passes (unit/host tests + Dolphin smoke boot).
+2. New hardware behaviour is ported from libogc/Dolphin semantics and the
+   source is named in a comment (see `gx.rs` / `video.rs` for the style).
+3. **GX/VI changes are tested on a real console when possible** — Dolphin
+   hides cache, rasterizer-range and copy-clear quirks. `gx-selftest` and
+   `gx-diag` give a one-photo verdict; attach it to the PR.
+4. New examples: `examples/NN-name/`, add `name` to the Makefile's
+   `EXAMPLES` and to the README table; a 96x32 `banner.ppm` + 5-line
+   `banner.txt` makes it `make sd`-able for Swiss.
+5. Keep it pure Rust: no C, no `build.rs` that compiles foreign code; use
+   `asm!` only where the hardware needs it.
+
+For coding agents: read this file first, run `make check` before claiming
+success, never claim hardware results you haven't been shown (ask the human
+for a photo of `gx-selftest`), and keep commits focused.
