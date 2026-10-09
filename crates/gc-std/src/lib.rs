@@ -103,6 +103,18 @@ impl Gc {
         self
     }
 
+    /// Hardware bring-up only: start GX while keeping the text console. GX
+    /// renders into the EFB and the console keeps owning the displayed
+    /// framebuffer, so a self-test can draw, read pixels back with
+    /// `gx::peek_argb` and print the results. Don't call `end_frame` (the
+    /// display copy would overwrite the console).
+    pub fn into_gx_with_console(self) -> gx::Context {
+        if GX_ON.swap(true, Ordering::AcqRel) {
+            panic!("gc_std: GX already in use");
+        }
+        gx::init(&self.video)
+    }
+
     /// Initialize the GX 3D pipeline. `gc.video()` remains available for
     /// the low-level pieces; 3D rendering goes through the returned context.
     pub fn into_gx(self) -> gx::Context {

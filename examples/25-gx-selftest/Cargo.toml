@@ -1,0 +1,8 @@
+[package]
+name = "gx-selftest"
+version = "0.1.0"
+edition = "2021"
+description = "gc-rust example: 25-gx-selftest"
+
+[dependencies]
+gc-std = { path = "../../crates/gc-std" }

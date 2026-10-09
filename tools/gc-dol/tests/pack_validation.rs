@@ -105,6 +105,21 @@ fn packs_and_validates_synthetic_elf() {
 }
 
 #[test]
+fn sections_are_32_byte_padded() {
+    // .text is 8 bytes and .rodata 4: both must still occupy whole 32-byte
+    // units in the file, or Dolphin's DolReader refuses the image.
+    let packed = pack_elf(&make_test_elf()).expect("pack failed");
+    let hdr = &packed.header;
+    assert_eq!(hdr.text[0].file_offset, 0x100);
+    assert_eq!(hdr.data[0].file_offset, 0x120);
+    assert_eq!(packed.image.len(), 0x140);
+
+    // an image truncated to the unpadded size must be rejected
+    let truncated = &packed.image[..0x124];
+    assert!(!validate_dol(truncated).is_empty());
+}
+
+#[test]
 fn rejects_little_endian() {
     let mut elf = make_test_elf();
     elf[5] = 1; // ELFDATA2LSB

@@ -75,6 +75,11 @@ pub fn parse_dol_header(buf: &[u8]) -> Result<DolHeader, String> {
 }
 
 /// Verify a .dol image against hard requirements.
+/// Round up to the 32-byte unit DOL loaders copy sections in.
+pub fn align32(v: u32) -> u32 {
+    (v + 31) & !31
+}
+
 pub fn validate_dol(buf: &[u8]) -> Vec<String> {
     let mut errs = Vec::new();
     let hdr = match parse_dol_header(buf) {
@@ -98,10 +103,20 @@ pub fn validate_dol(buf: &[u8]) -> Vec<String> {
                 s.addr, s.size
             ));
         }
-        if (s.file_offset as usize + s.size as usize) > buf.len() {
+        // Loaders (apploaders, IOS, Dolphin's DolReader) copy each section
+        // in 32-byte units, so the 32-aligned extent must lie inside the file.
+        if (s.file_offset as usize + align32(s.size) as usize) > buf.len() {
             errs.push(format!(
-                "section at {:#010x}: file offset {:#x} + size {:#x} runs past file end",
-                s.addr, s.file_offset, s.size
+                "section at {:#010x}: file offset {:#x} + aligned size {:#x} runs past file end",
+                s.addr,
+                s.file_offset,
+                align32(s.size)
+            ));
+        }
+        if s.file_offset % 32 != 0 {
+            errs.push(format!(
+                "section at {:#010x}: file offset {:#x} not 32-byte aligned",
+                s.addr, s.file_offset
             ));
         }
     }
@@ -231,13 +246,15 @@ pub fn pack_elf(raw: &[u8]) -> Result<PackedDol, String> {
     let mut text_secs: Vec<DolSection> = Vec::new();
     let mut data_secs: Vec<DolSection> = Vec::new();
 
+    // Every section starts on a 32-byte file offset and is zero-padded to a
+    // 32-byte multiple (loaders read whole 32-byte units).
     for s in &texts {
         text_secs.push(DolSection { file_offset: cur_off, addr: s.addr, size: s.size });
-        cur_off += s.size;
+        cur_off += align32(s.size);
     }
     for s in &datas {
         data_secs.push(DolSection { file_offset: cur_off, addr: s.addr, size: s.size });
-        cur_off += s.size;
+        cur_off += align32(s.size);
     }
 
     for i in 0..MAX_TEXT {
@@ -260,6 +277,7 @@ pub fn pack_elf(raw: &[u8]) -> Result<PackedDol, String> {
 
     for s in texts.iter().chain(datas.iter()) {
         out.extend_from_slice(&raw[s.offset as usize..(s.offset + s.size) as usize]);
+        out.resize(out.len() + (align32(s.size) - s.size) as usize, 0);
     }
 
     Ok(PackedDol {

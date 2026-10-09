@@ -10,3 +10,4 @@ tools/dol/gc-dol
 *.o
 *.d
 *.map
+tools/gc-bnr/target-host/

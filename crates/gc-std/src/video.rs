@@ -1,7 +1,7 @@
 //! Video Interface (VI) driver — pure Rust port of the relevant parts of
 //! libogc's `video.c` (zlib license, (c) devkitPro).
 //!
-//! Supports the mode every GC demo uses: 640×480 (NTSC) / 640×576 (PAL)
+//! Supports the mode every GC demo uses: 640×480 (NTSC) / 640×574 (PAL)
 //! interlaced, double-field framebuffer, 4:2:2 YUY2. Timing values come
 //! from libogc's `video_timing` table. Vsync wait polls VI's current
 //! display position registers, no IRQs needed.
@@ -240,9 +240,11 @@ static mut CURRENT: Video = Video {
 fn mode_for(standard: Standard, fm: FrameMode) -> GXRModeObj {
     let interlaced = fm == FrameMode::Interlaced;
     let progressive = fm == FrameMode::Progressive;
-    let (height_576, fb_h) = match standard {
-        Standard::Pal => (true, 576u16),
-        Standard::Ntsc | Standard::Mpal | Standard::EurRgb60 => (false, 480u16),
+    // PAL follows libogc's TVPal528IntDf: the EFB tops out at 528 lines, so
+    // render 528 and let the display copy scale up to 574 XFB lines.
+    let (efb_h, xfb_h) = match standard {
+        Standard::Pal => (528u16, 574u16),
+        Standard::Ntsc | Standard::Mpal | Standard::EurRgb60 => (480u16, 480u16),
     };
     let tv_bits = match standard {
         Standard::Ntsc => 0u32,
@@ -254,12 +256,12 @@ fn mode_for(standard: Standard, fm: FrameMode) -> GXRModeObj {
     GXRModeObj {
         viTVMode: (tv_bits << 2) | interlace_bits,
         fbWidth: 640,
-        efbHeight: fb_h,
-        xfbHeight: if progressive { fb_h } else { fb_h },
+        efbHeight: efb_h,
+        xfbHeight: xfb_h,
         viXOrigin: 40,
-        viYOrigin: 0,
+        viYOrigin: if xfb_h == 574 { 1 } else { 0 }, // (576 - 574) / 2
         viWidth: 640,
-        viHeight: if height_576 { 528 } else { 480 },
+        viHeight: xfb_h,
         xfbMode: if progressive { 0 } else { 1 }, // DF when interlaced
         field_rendering: 0,
         aa: 0,
@@ -314,8 +316,11 @@ pub(crate) fn init() -> Video {
         // the heap ends just below them. Two slots of XFB_SLOT_BYTES each.
         let size = usize::from(mode.fbWidth) * usize::from(mode.xfbHeight) * 2;
         for slot in 0..2u8 {
-            let p = slot_ptr(slot) as *mut u8;
-            core::ptr::write_bytes(p, 0x10, size); // black (uncached view)
+            // YUY2 black is Y=0x10, U=V=0x80 (all-0x10 would be green)
+            let p = slot_ptr(slot) as *mut u32;
+            for i in 0..size / 4 {
+                p.add(i).write_volatile(0x1080_1080);
+            }
         }
 
         let fb = slot_ptr(0);
@@ -442,7 +447,11 @@ fn configure(mode: &GXRModeObj, fb: *mut core::ffi::c_void) {
         vi_write(13, (t.be2 << 5) | t.bs2);
 
         vi_write(24, 0x1000 | ((t.nhlines / 2) + 1));
-        vi_write(25, t.hlw + 1);
+        vi_write(25, if t.nhlines % 2 == 1 { t.hlw + 1 } else { 1 });
+
+        // horizontal scaler off (fbWidth == viWidth); never inherit the
+        // loader's scaling (libogc __setScalingRegs)
+        vi_write(37, 0x100);
 
         let (div1, div2): (u32, u32) = if t.equ >= 10 { (1, 2) } else { (2, 1) };
         let prb = div2 * 0;
@@ -472,14 +481,22 @@ fn configure(mode: &GXRModeObj, fb: *mut core::ffi::c_void) {
 unsafe fn program_frame_buffers(mode: &GXRModeObj, fb: *mut core::ffi::c_void) {
     let wpl = (u32::from(mode.fbWidth) + 15) / 16;
     let bytes_per_line = (wpl << 5) & 0x1fe0;
-    let tfbb = hw::virt_to_phys(fb);
+    let mut tfbb = hw::virt_to_phys(fb);
     let mut bfbb = tfbb;
     if mode.xfbMode == 1 {
         bfbb += bytes_per_line;
     }
-    vi_write(14, (tfbb >> 16) as u16);
+    // The FBB fields hold 24 bits. Buffers at or above 16 MiB (our XFB
+    // slots live at 0x01694000) must be programmed as 32-byte units with
+    // POFF set — libogc's __setFbbRegs does the same.
+    let poff = tfbb >= 0x0100_0000 || bfbb >= 0x0100_0000;
+    if poff {
+        tfbb >>= 5;
+        bfbb >>= 5;
+    }
+    vi_write(14, ((poff as u16) << 12) | ((tfbb >> 16) & 0xff) as u16);
     vi_write(15, (tfbb & 0xffff) as u16);
-    vi_write(18, (bfbb >> 16) as u16);
+    vi_write(18, ((bfbb >> 16) & 0xff) as u16);
     vi_write(19, (bfbb & 0xffff) as u16);
 
     let std = if mode.xfbMode == 1 { wpl << 1 } else { wpl };
@@ -509,16 +526,14 @@ fn wait_vsync_inner() {
         let mut last = vi_read(22) & 0x3ff;
         loop {
             // debounce
-            let mut vold = vi_read(22) & 0x3ff;
-            let mut hp = vi_read(23) & 0x7ff;
-            while (vi_read(22) & 0x3ff) != vold {
-                vold = vi_read(22) & 0x3ff;
-                hp = vi_read(23) & 0x7ff;
+            let mut v = vi_read(22) & 0x3ff;
+            while (vi_read(22) & 0x3ff) != v {
+                v = vi_read(22) & 0x3ff;
             }
-            let v = vold;
-            let h = hp;
-            if last != 0 && v < last && h < 40 {
-                // frame boundary
+            // vpos wrapping back is the frame boundary. Don't also demand a
+            // small hpos: emulators (and slow loop iterations) can step past
+            // that one-poll window and spin here forever.
+            if last != 0 && v < last {
                 break;
             }
             last = v;

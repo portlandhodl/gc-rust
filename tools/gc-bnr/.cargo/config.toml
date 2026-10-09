@@ -1,0 +1,6 @@
+# Host tool config: keep our builds on the host target regardless of the
+# workspace-wide GameCube default.
+[build]
+target = "x86_64-unknown-linux-gnu"
+target-dir = "target-host"
+rustflags = []

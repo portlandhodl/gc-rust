@@ -7,9 +7,9 @@
 //! functions that dirty-mark and a dirty-state flush at `begin`/`flush`
 //! time — exactly like libogc (`__GX_SetDirtyState`).
 //!
-//! We do not use a command FIFO: everything streams through the
-//! write-gather pipe (immediate mode), which the GP accepts when CP is in
-//! its power-on state with no FIFO attached.
+//! Commands stream through the write-gather pipe into one CPU/GP-linked
+//! FIFO in MEM1 (libogc's default immediate-mode setup). Without a FIFO
+//! attached the gather-pipe bursts go nowhere and the GP never sees them.
 
 use crate::gctypes::{GXColor, Mtx, Mtx44};
 use crate::hw::{self, WG_PIPE};
@@ -124,6 +124,7 @@ pub const GX_AF_NONE: u8 = 2;
 
 pub const GX_PNMTX0: u8 = 0;
 pub const GX_PERSPECTIVE: u8 = 0;
+pub const GX_ORTHOGRAPHIC: u8 = 1;
 
 pub const GX_LEQUAL: u8 = 3;
 pub const GX_ALWAYS: u8 = 7;
@@ -211,7 +212,21 @@ impl GxRegs {
         GxRegs {
             tev_color_env: [0; 16],
             tev_alpha_env: [0; 16],
-            tev_ras_order: [0; 11],
+            // entries 3..=10 are BP 0x28..0x2f (TEV order); the BP id must
+            // ride in the top byte or the write lands on GenMode (BP 0x00)
+            tev_ras_order: [
+                0,
+                0,
+                0,
+                0x28 << 24,
+                0x29 << 24,
+                0x2a << 24,
+                0x2b << 24,
+                0x2c << 24,
+                0x2d << 24,
+                0x2e << 24,
+                0x2f << 24,
+            ],
             su_ssize: [0; 8],
             su_tsize: [0; 8],
             gen_mode: 0,
@@ -291,6 +306,7 @@ impl Context {
     /// Block until the GPU has consumed all issued commands.
     pub fn draw_done(&self) {
         flush();
+        wait_fifo_drained();
     }
 
     /// Copy the finished frame into the back XFB, then flip: the new frame
@@ -298,11 +314,14 @@ impl Context {
     /// front buffer becomes the draw target of the next `end_frame`.
     pub fn end_frame(&self) {
         copy_disp();
+        flush();
+        wait_fifo_drained();
         crate::video::flip_current();
     }
 }
 
-/// Flush the pipe with 8 zero bytes (GX_Flush without fifo).
+/// Flush the pipe with 8 zero bytes (GX_Flush): pushes any partial 32-byte
+/// gather burst out into the FIFO.
 #[inline(always)]
 pub fn flush() {
     unsafe {
@@ -315,6 +334,183 @@ pub fn flush() {
 }
 
 // ---------------------------------------------------------------------------
+// command FIFO (GX_InitFifoBase + GX_SetCPUFifo + GX_SetGPFifo, linked)
+// ---------------------------------------------------------------------------
+
+const FIFO_SIZE: usize = 1024 * 1024;
+/// Room `begin` keeps free before streaming another primitive batch: the
+/// largest single batch we expect (immediate mode, f32 pos + rgba8) plus
+/// headroom. We poll instead of taking the hi-watermark interrupt.
+const FIFO_HEADROOM: u32 = 384 * 1024;
+
+#[repr(C, align(32))]
+struct FifoMem([u8; FIFO_SIZE]);
+static mut FIFO: FifoMem = FifoMem([0; FIFO_SIZE]);
+
+// CP register indices (u16 units from 0xCC000000)
+const CP_CR: u16 = 1;
+const CP_CLEAR: u16 = 2;
+const CP_FIFO_BASE: u16 = 16;
+const CP_FIFO_END: u16 = 18;
+const CP_FIFO_HI: u16 = 20;
+const CP_FIFO_LO: u16 = 22;
+const CP_FIFO_RW_DIST: u16 = 24;
+const CP_FIFO_WP: u16 = 26;
+const CP_FIFO_RP: u16 = 28;
+// CP_CR bits
+const CP_CR_GP_READ: u16 = 0x01;
+const CP_CR_GP_LINK: u16 = 0x10;
+
+unsafe fn cp_write32(idx: u16, v: u32) {
+    hw::cp_write(idx, (v & 0xffff) as u16);
+    hw::cp_write(idx + 1, (v >> 16) as u16);
+}
+
+unsafe fn cp_read32(idx: u16) -> u32 {
+    // hi half may tick between reads; re-read until stable
+    loop {
+        let hi = hw::cp_read(idx + 1);
+        let lo = hw::cp_read(idx);
+        if hw::cp_read(idx + 1) == hi {
+            return (u32::from(hi) << 16) | u32::from(lo);
+        }
+    }
+}
+
+fn init_fifo() {
+    unsafe {
+        let base = core::ptr::addr_of!(FIFO) as *const u8;
+        // BSS zeroing left dirty lines over the FIFO; drop them so a later
+        // write-back can't clobber commands the gather pipe put there.
+        hw::dc_invalidate_range(base, FIFO_SIZE);
+        let start = hw::virt_to_phys(base);
+        let end = start + FIFO_SIZE as u32 - 4;
+        let hi = FIFO_SIZE as u32 - 16 * 1024;
+        let lo = (FIFO_SIZE as u32 >> 1) & !31;
+
+        // GP side: stop reading, clear over/underflow, program the ring
+        hw::cp_write(CP_CR, 0);
+        hw::cp_write(CP_CLEAR, 0x3);
+        cp_write32(CP_FIFO_BASE, start);
+        cp_write32(CP_FIFO_END, end);
+        cp_write32(CP_FIFO_HI, hi);
+        cp_write32(CP_FIFO_LO, lo);
+        cp_write32(CP_FIFO_RW_DIST, 0);
+        cp_write32(CP_FIFO_WP, start);
+        cp_write32(CP_FIFO_RP, start);
+        hw::sync();
+
+        // CPU side: point the gather pipe's PI FIFO at the same ring
+        hw::write32(hw::PI_BASE + 0x0C, start);
+        hw::write32(hw::PI_BASE + 0x10, end);
+        hw::write32(hw::PI_BASE + 0x14, start & 0x3FFF_FFE0);
+        hw::sync();
+
+        // link CPU writes to GP reads, no watermark interrupts (we poll)
+        hw::cp_write(CP_CR, CP_CR_GP_READ | CP_CR_GP_LINK);
+        hw::sync();
+    }
+}
+
+/// Push out the pending gather burst and spin until the GP has consumed
+/// every queued command (the free-function form of `Context::draw_done`).
+pub fn wait_gp_idle() {
+    flush();
+    wait_fifo_drained();
+}
+
+// ---------------------------------------------------------------------------
+// diagnostics (hardware bring-up): GP sync tokens, EFB peeks, FIFO state
+// ---------------------------------------------------------------------------
+
+/// GX_SetDrawSync: the GP writes `token` to PE_TOKEN once every command
+/// queued before it has been processed.
+pub fn set_draw_sync(token: u16) {
+    load_bp(0x4800_0000 | u32::from(token));
+    load_bp(0x4700_0000 | u32::from(token));
+    flush();
+}
+
+/// Last draw-sync token the GP reached (PE_TOKEN).
+pub fn draw_sync_token() -> u16 {
+    unsafe { hw::pe_read(7) }
+}
+
+/// GX_PeekARGB: CPU read of one EFB color pixel (0xAARRGGBB).
+pub fn peek_argb(x: u16, y: u16) -> u32 {
+    unsafe { hw::read32(0xC800_0000 | (u32::from(x & 0x3ff) << 2) | (u32::from(y & 0x3ff) << 12)) }
+}
+
+/// GX_PeekZ: CPU read of one EFB depth value (24-bit).
+pub fn peek_z(x: u16, y: u16) -> u32 {
+    unsafe { hw::read32(0xC840_0000 | (u32::from(x & 0x3ff) << 2) | (u32::from(y & 0x3ff) << 12)) & 0x00ff_ffff }
+}
+
+/// Raw CP-side FIFO registers.
+#[derive(Copy, Clone, Debug)]
+pub struct FifoState {
+    pub cp_status: u16,
+    pub cp_ctrl: u16,
+    pub base: u32,
+    pub end: u32,
+    pub write_ptr: u32,
+    pub read_ptr: u32,
+    pub distance: u32,
+    pub pi_base: u32,
+    pub pi_end: u32,
+    pub pi_write: u32,
+}
+
+pub fn fifo_state() -> FifoState {
+    unsafe {
+        FifoState {
+            cp_status: hw::cp_read(0),
+            cp_ctrl: hw::cp_read(CP_CR),
+            base: cp_read32(CP_FIFO_BASE),
+            end: cp_read32(CP_FIFO_END),
+            write_ptr: cp_read32(CP_FIFO_WP),
+            read_ptr: cp_read32(CP_FIFO_RP),
+            distance: cp_read32(CP_FIFO_RW_DIST),
+            pi_base: hw::read32(hw::PI_BASE + 0x0C),
+            pi_end: hw::read32(hw::PI_BASE + 0x10),
+            pi_write: hw::read32(hw::PI_BASE + 0x14),
+        }
+    }
+}
+
+/// GX_AbortFrame: pulse PI_FIFO_RESET to drop any half-parsed command.
+fn abort_frame() {
+    unsafe {
+        hw::write32(hw::PI_BASE + 0x18, 1);
+        hw::sync();
+        crate::timebase::delay_us(50);
+        hw::write32(hw::PI_BASE + 0x18, 0);
+        hw::sync();
+        crate::timebase::delay_us(5);
+    }
+}
+
+/// Spin until the GP has consumed everything in the FIFO (bounded, so a
+/// wedged GP degrades to tearing rather than a hang).
+fn wait_fifo_drained() {
+    for _ in 0..4_000_000 {
+        if unsafe { cp_read32(CP_FIFO_RW_DIST) } == 0 {
+            return;
+        }
+    }
+}
+
+/// Keep the CPU from lapping the GP around the ring.
+fn wait_fifo_room() {
+    let limit = FIFO_SIZE as u32 - FIFO_HEADROOM;
+    for _ in 0..4_000_000 {
+        if unsafe { cp_read32(CP_FIFO_RW_DIST) } <= limit {
+            return;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // init
 // ---------------------------------------------------------------------------
 
@@ -322,6 +518,12 @@ pub(crate) fn init(video: &Video) -> Context {
     unsafe {
         GX = alloc::boxed::Box::into_raw(alloc::boxed::Box::new(GxRegs::new()));
     }
+
+    // Whatever ran before us (Swiss, the IPL, another homebrew) may have
+    // left the GP mid-command; reset the PI->CP FIFO path first so our
+    // stream starts on a command boundary (libogc GX_AbortFrame).
+    abort_frame();
+    init_fifo();
 
     // "GX_Init" baseline: set up magic regs written by libogc __gx_init.
     // Divider constants (bus clock = 162 MHz):
@@ -374,7 +576,35 @@ fn setup_defaults(video: &Video) {
     set_disp_copy_yscale(yscale);
     set_copy_filter(mode.aa, &mode.sample_pattern, 1, &mode.vfilter);
 
-    // disable DPMS clipping? libogc culls BACK faces by default (0x00000101 = flat); set zmode/color update
+    // Power-on GX state that __GX_InitGX always overrides. Without these
+    // nothing reaches the EFB on a cold GP (Dolphin emulates that exactly):
+    // scissor box offset = the +342 bias baked into viewport/scissor coords
+    // (GX_SetScissorBoxOffset(0, 0)); otherwise the viewport sits off-EFB.
+    load_bp(0x5900_0000 | (342 >> 1) | ((342 >> 1) << 10));
+    // GX_SetAlphaCompare(ALWAYS, 0, AOP_AND, ALWAYS, 0): power-on is NEVER.
+    load_bp(0xF300_0000 | (7 << 16) | (7 << 19));
+    // GX_SetTevSwapModeTable defaults: RGBA, RRRA, GGGA, BBBA.
+    for (i, (r, g, b, a)) in [(0u32, 1u32, 2u32, 3u32), (0, 0, 0, 3), (1, 1, 1, 3), (2, 2, 2, 3)]
+        .iter()
+        .enumerate()
+    {
+        let ra = 0xF6 + 2 * i as u32;
+        load_bp((ra << 24) | r | (g << 2));
+        load_bp(((ra + 1) << 24) | b | (a << 2));
+    }
+    // GX_SetFieldMask(ENABLE, ENABLE)
+    load_bp(0x4400_0003);
+    // GX_SetClipMode(GX_CLIP_ENABLE): a loader may have turned clipping off,
+    // and unclipped triangles behind the eye turn into screen-wide spikes.
+    load_xf(0x1005, 0);
+    // GX_SetPixelFmt(RGB8_Z24, ZC_LINEAR) + GX_SetZCompLoc(TRUE): a loader
+    // may have left an AA/565 EFB format, which garbles every copy.
+    gx().pe_cntrl = (0x43 << 24) | 0x40;
+    load_bp(gx().pe_cntrl);
+    // GX_SetCopyClamp(CLAMP_TOP | CLAMP_BOTTOM)
+    gx().disp_copy_cntrl |= 0x3;
+
+    // libogc culls BACK faces by default; set zmode/color update
     set_z_mode(true, GX_LEQUAL, true);
     set_color_update(true);
     set_cull_mode(GX_CULL_BACK);
@@ -453,10 +683,9 @@ pub fn set_disp_copy_dst(w: u16, _h: u16) {
 }
 
 pub fn get_yscale_factor(efb_h: u16, xfb_h: u16) -> f32 {
-    // simple version of libogc GX_GetYScaleFactor without the iterative fix;
-    // our modes always scale 1:1 for 480/576 heights
-    let _ = (efb_h, xfb_h);
-    efb_h as f32 / xfb_h as f32
+    // libogc GX_GetYScaleFactor without the iterative fix: xfb/efb, so
+    // > 1 stretches (PAL 528 -> 574); 1:1 for NTSC 480
+    xfb_h as f32 / efb_h as f32
 }
 
 pub fn set_disp_copy_yscale(scale: f32) {
@@ -609,27 +838,35 @@ pub fn set_tev_order(stage: u8, texcoord: u8, texmap: u8, color: u8) {
 }
 
 pub fn set_tev_op(stage: u8, mode: u8) {
-    let (defcolor, defalpha);
-    if stage == GX_TEVSTAGE0 {
-        defcolor = 0x0f; // GX_CC_RASC
-        defalpha = 0x07; // GX_CA_RASA
-    } else {
-        defcolor = 0x00; // GX_CC_CPREV
-        defalpha = 0x00; // GX_CA_APREV
-    }
+    // GX_CC_* / GX_CA_* input selectors (ogc/gx.h)
+    const CC_CPREV: u8 = 0x0;
+    const CC_TEXC: u8 = 0x8;
+    const CC_RASC: u8 = 0xa;
+    const CC_ZERO: u8 = 0xf;
+    const CA_APREV: u8 = 0x0;
+    const CA_TEXA: u8 = 0x4;
+    const CA_RASA: u8 = 0x5;
+    const CA_ZERO: u8 = 0x7;
 
+    let (defcolor, defalpha) = if stage == GX_TEVSTAGE0 {
+        (CC_RASC, CA_RASA)
+    } else {
+        (CC_CPREV, CA_APREV)
+    };
+
+    // exactly libogc's GX_SetTevOp
     match mode {
         GX_MODULATE => {
-            set_tev_color_in(stage, 0, 0x0e, defcolor, 0);
-            set_tev_alpha_in(stage, 0, 0x07, defalpha, 0);
+            set_tev_color_in(stage, CC_ZERO, CC_TEXC, defcolor, CC_ZERO);
+            set_tev_alpha_in(stage, CA_ZERO, CA_TEXA, defalpha, CA_ZERO);
         }
         GX_REPLACE => {
-            set_tev_color_in(stage, 0, 0, 0, 0x0e);
-            set_tev_alpha_in(stage, 0, 0, 0, 0x07);
+            set_tev_color_in(stage, CC_ZERO, CC_ZERO, CC_ZERO, CC_TEXC);
+            set_tev_alpha_in(stage, CA_ZERO, CA_ZERO, CA_ZERO, CA_TEXA);
         }
         GX_PASSCLR => {
-            set_tev_color_in(stage, 0, 0, 0, defcolor);
-            set_tev_alpha_in(stage, 0, 0, 0, defalpha);
+            set_tev_color_in(stage, CC_ZERO, CC_ZERO, CC_ZERO, defcolor);
+            set_tev_alpha_in(stage, CA_ZERO, CA_ZERO, CA_ZERO, defalpha);
         }
         _ => {}
     }
@@ -815,22 +1052,16 @@ pub fn set_vtx_attr_fmt(vtxfmt: u8, attr: u8, comptype: u8, compfmt: u8, frac: u
 // ---------------------------------------------------------------------------
 
 pub fn load_projection_mtx(mt: &Mtx44, ty: u8) {
+    // GX_LoadProjectionMtx: perspective keeps the [x][2] terms, ortho the
+    // [x][3] translation terms; the 7th word is the type as an integer
+    let (c0, c1) = if ty == GX_ORTHOGRAPHIC { (mt[0][3], mt[1][3]) } else { (mt[0][2], mt[1][2]) };
     unsafe {
-        let t = [[mt[0][0], mt[0][2], mt[1][1], mt[1][2], mt[2][2], mt[2][3], ty as f32]];
-        let mut tf = [0f32; 7];
-        tf[0] = t[0][0];
-        tf[1] = t[0][1];
-        tf[2] = t[0][2];
-        tf[3] = t[0][3];
-        tf[4] = t[0][4];
-        tf[5] = t[0][5];
-        tf[6] = u32::from(ty) as f32;
-        // XF load 7 floats
         (WG_PIPE as *mut u8).write_volatile(0x10);
         (WG_PIPE as *mut u32).write_volatile(((7 - 1) << 16) | 0x1020);
-        for v in tf {
+        for v in [mt[0][0], c0, mt[1][1], c1, mt[2][2], mt[2][3]] {
             (WG_PIPE as *mut f32).write_volatile(v);
         }
+        (WG_PIPE as *mut u32).write_volatile(u32::from(ty));
     }
 }
 
@@ -859,6 +1090,7 @@ pub fn set_current_mtx(mtx: u32) {
 
 /// GX_Begin; flushes dirty state first.
 pub fn begin(primitive: Primitive, vtxfmt: u8, count: u16) {
+    wait_fifo_room();
     set_dirty_state();
     unsafe {
         (WG_PIPE as *mut u8).write_volatile(primitive as u8 | (vtxfmt & 7));
@@ -901,9 +1133,20 @@ pub fn texcoord2f32(s: f32, t: f32) {
 // inventory: set_disp_copy_src/dst write into state; copy_disp issues the copy.
 fn copy_disp() {
     let g = gx();
-    // clear path: write peZMode/peCMode0 cleared, then copy regs
-    load_bp((g.pe_zmode & !0xf) | 0xf);
+    // clear path: z test ALWAYS, and force z *update* on (libogc keeps the
+    // caller's update bit; if the last draw turned it off the copy's clear
+    // would leave stale depth for the next frame), no color/alpha blend
+    load_bp((g.pe_zmode & !0x1f) | 0x1f);
     load_bp(g.pe_cmode0 & !0x3);
+    // Hardware quirk (libogc GX_CopyDisp's `clflag`): with z compare before
+    // texturing (PE control bit 6, zcomploc) the copy's clear does NOT reset
+    // the depth buffer, so drop the bit for the clearing copy. Dolphin
+    // doesn't emulate this; on a console every z-tested pixel then fights
+    // stale depth from earlier frames.
+    let zcomploc = g.pe_cntrl & 0x40 != 0;
+    if zcomploc {
+        load_bp(g.pe_cntrl & !0x40);
+    }
 
     load_bp(g.disp_copy_tl);
     load_bp(g.disp_copy_wh);
@@ -920,6 +1163,9 @@ fn copy_disp() {
     // restore
     load_bp(g.pe_zmode);
     load_bp(g.pe_cmode0);
+    if zcomploc {
+        load_bp(g.pe_cntrl);
+    }
 }
 
 /// __GX_SetDirtyState reduced to the pieces our examples actually mutate.

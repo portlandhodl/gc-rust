@@ -1,0 +1,15 @@
+[workspace]
+
+[package]
+name = "gc-bnr"
+version = "0.1.0"
+edition = "2021"
+description = "GameCube opening.bnr (BNR1) builder: 96x32 PPM + text -> banner Swiss/IPL can show"
+
+[lib]
+name = "gc_bnr"
+path = "src/lib.rs"
+
+[[bin]]
+name = "gc-bnr"
+path = "src/main.rs"

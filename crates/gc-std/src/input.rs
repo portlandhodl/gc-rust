@@ -109,10 +109,12 @@ fn read_origin(chan: u32) -> bool {
 }
 
 #[inline]
-fn clamp_stick(raw: u8, origin_bits: u8) -> i8 {
-    // origin_bits is (orig - 128), already stored biased by libogc table
-    let v = (raw as i32) - 128 - (origin_bits as i32);
-    v.clamp(-128, 127) as i8
+fn clamp_stick(raw: u8, origin: u8) -> i8 {
+    // `origin` is the raw resting position from cmd 0x41 (~0x80 when
+    // centred), so the calibrated deflection is simply raw - origin. A zero
+    // origin means the origin read hasn't landed yet: assume dead centre.
+    let o = if origin == 0 { 128 } else { origin as i32 };
+    ((raw as i32) - o).clamp(-128, 127) as i8
 }
 
 pub(crate) fn init() {

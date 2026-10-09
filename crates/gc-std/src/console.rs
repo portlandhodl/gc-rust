@@ -150,7 +150,8 @@ impl Console {
     /// the built-in colors, so this looks right).
     #[inline]
     fn render_glyph(&self, c: u8) {
-        let base = (c as usize - 32) * FONT_H;
+        // FONT_8X16 holds all 256 CP437 glyphs from code 0, so index by c
+        let base = c as usize * FONT_H;
         let glyph = &crate::font::FONT_8X16[base..base + FONT_H];
         let px = self.margin + self.cx * FONT_W;
         let py = self.margin + self.cy * FONT_H;

@@ -1,0 +1,8 @@
+[package]
+name = "gx-diag"
+version = "0.1.0"
+edition = "2021"
+description = "gc-rust example: 24-gx-diag"
+
+[dependencies]
+gc-std = { path = "../../crates/gc-std" }

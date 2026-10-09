@@ -61,9 +61,11 @@ SECTIONS
        crates/gc-std/src/video.rs) so the heap ends below them and the test
        harness knows where rendered frames live on a real console / in
        Dolphin. Space for TWO worst-case buffers (640x576x2 B each) so the
-       driver can offer a flip chain. */
-    __Arena1Hi = 0x81694000;
-    __xfb_base = 0x81694000;
+       driver can offer a flip chain. They end at 0x817EC000, leaving the
+       main stack (growing down from __stack) ~76 KiB before it would run
+       into the second framebuffer. */
+    __Arena1Hi = 0x81684000;
+    __xfb_base = 0x81684000;
     __stack = 0x817FEFF0;
 
     /DISCARD/ : {
