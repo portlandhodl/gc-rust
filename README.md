@@ -59,6 +59,9 @@ whatever machine you're on — x86_64 or ARM.
 The nightly toolchain and `rust-src` are picked up automatically from
 `rust-toolchain.toml` the first time you build.
 
+📖 **Step-by-step commands for each OS, including running in Dolphin:
+[docs/building.md](docs/building.md).**
+
 ## 🎮 On a real GameCube
 
 1. `make sd EXAMPLE=yarn-cat`
