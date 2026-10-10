@@ -102,7 +102,9 @@ via the in-tree `tools/gc-dol` host tool.
   Its `Binaries/Sys` must exist (symlink to `../../Data/Sys`) — the build
   is not installed, and without Sys Dolphin can't find its data.
   The flatpak Dolphin is no longer used.
-- `make run EXAMPLE=<pkg>` — opens the DOL in that Dolphin (X11 window).
+- `make run EXAMPLE=<pkg>` — opens the DOL in that Dolphin (`DOLPHIN_NOGUI=`,
+  `DOLPHIN_PLATFORM=` override; host tools build for the host triple, so
+  Linux/macOS/Windows-MSYS2 all work).
 - Seeing frames without a window: `-p headless -C Dolphin.Movie.DumpFrames=True
   -C Dolphin.Movie.DumpFramesSilent=True` writes `<user>/Dump/Frames/*.avi`
   (this build has FFmpeg, so it's an AVI, not PNGs); pull stills with ffmpeg.

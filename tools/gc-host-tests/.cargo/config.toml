@@ -1,6 +1,6 @@
 # Host-only test crate: stay on the host target regardless of the
 # workspace-wide GameCube default.
 [build]
-target = "x86_64-unknown-linux-gnu"
+target = "host-tuple"
 target-dir = "target-host"
 rustflags = []

@@ -43,6 +43,25 @@ make sd EXAMPLE=yarn-cat   # Swiss-ready SD folder with a banner
 
 That's it. No devkitPro, no gcc, no libogc, no elf2dol.
 
+### 🖥️ Linux, macOS, Windows
+
+The GameCube side only needs Rust. The build is driven by GNU `make` and a
+POSIX shell, and the host tools (`gc-dol`, `gc-iso`, `gc-bnr`) build for
+whatever machine you're on — x86_64 or ARM.
+
+| OS | one-time setup | then |
+|----|----------------|------|
+| **Linux** | [rustup](https://rustup.rs) + `make` (`apt install make`, `dnf install make`, …) | `make` |
+| **macOS** | [rustup](https://rustup.rs) + `xcode-select --install` (provides `make` and the host linker) | `make` |
+| **Windows** | [rustup-init.exe](https://rustup.rs) (accept the Visual Studio Build Tools prompt), then [MSYS2](https://www.msys2.org) with `pacman -S make` | in the MSYS2 shell: `export PATH="$PATH:$(cygpath "$USERPROFILE")/.cargo/bin"` then `make` |
+| **Windows (WSL2)** | inside WSL, follow the Linux row | `make` |
+
+The nightly toolchain and `rust-src` are picked up automatically from
+`rust-toolchain.toml` the first time you build.
+
+📖 **Step-by-step commands for each OS, including running in Dolphin:
+[docs/building.md](docs/building.md).**
+
 ## 🎮 On a real GameCube
 
 1. `make sd EXAMPLE=yarn-cat`
@@ -144,9 +163,13 @@ make check   # gc-dol + gc-bnr unit tests, host tests (matrix math, heap,
              # boot of every dist/*.dol
 ```
 
-The Dolphin smoke tests use a source build of Dolphin (nogui) at
-`~/git/dolphin/build-x86_64-release/Binaries/dolphin-emu-nogui` (override
-with `DOLPHIN_NOGUI=...`); they're skipped when it's absent:
+The Dolphin smoke tests (and `make run`) use a source build of Dolphin
+(nogui) at `~/git/dolphin/build-x86_64-release/Binaries/dolphin-emu-nogui`;
+override it with `DOLPHIN_NOGUI=/path/to/dolphin-emu-nogui` (and optionally
+`DOLPHIN_PLATFORM=x11|win32|macos|headless`). The smoke tests are skipped when
+Dolphin is absent, so `make check` still runs the unit and host tests on any
+OS. They also need coreutils `timeout` (`brew install coreutils` on macOS).
+To build Dolphin on Linux:
 
 ```bash
 cmake -G Ninja -B build-x86_64-release \

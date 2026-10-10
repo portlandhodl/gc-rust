@@ -21,6 +21,11 @@ if [ ! -x "$DOLPHIN_NOGUI" ]; then
     echo "SKIP: no dolphin-emu-nogui at $DOLPHIN_NOGUI" >&2
     exit 77
 fi
+# coreutils `timeout`; macOS has it as `gtimeout` (brew install coreutils)
+TIMEOUT=$(command -v timeout || command -v gtimeout) || {
+    echo "SKIP: no timeout/gtimeout command" >&2
+    exit 77
+}
 
 run_one() {
     name="$1"
@@ -29,7 +34,7 @@ run_one() {
     log="$USER_DIR/out.log"
     rm -f "$log"
     # SIGTERM first (nogui shuts down cleanly), KILL if it lingers
-    timeout -k 2 "$RUN_SECS" \
+    "$TIMEOUT" -k 2 "$RUN_SECS" \
         "$DOLPHIN_NOGUI" -p headless -v Null -a HLE \
         -u "$USER_DIR/user" -e "$PWD/$dol" >"$log" 2>&1
     rc=$?
