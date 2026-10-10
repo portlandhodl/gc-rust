@@ -12,7 +12,7 @@ FAILURES=0
 RUN_SECS=${RUN_SECS:-8}
 USER_DIR=$(mktemp -d)
 
-DOLPHIN_SRC="$HOME/git/dolphin/build-x86_64-release/Binaries/dolphin-emu-nogui"
+DOLPHIN_SRC=${DOLPHIN_NOGUI:-$HOME/git/dolphin/build-x86_64-release/Binaries/dolphin-emu-nogui}
 if [ -x "$DOLPHIN_SRC" ]; then
     DOLPHIN_BIN="$DOLPHIN_SRC"
     DOLPHIN_FLATPAK=""
@@ -23,18 +23,23 @@ else
     echo "SKIP: no dolphin build found"
     exit 77
 fi
+# coreutils `timeout`; macOS has it as `gtimeout` (brew install coreutils)
+TIMEOUT=$(command -v timeout || command -v gtimeout) || {
+    echo "SKIP: no timeout/gtimeout command" >&2
+    exit 77
+}
 
 run_iso() {
     iso="$1"
     name=$(basename "$iso" .iso)
     log="$USER_DIR/$name.log"
     if [ -n "$DOLPHIN_FLATPAK" ]; then
-        timeout -s KILL -k 2 "$RUN_SECS" \
+        "$TIMEOUT" -s KILL -k 2 "$RUN_SECS" \
             flatpak run --env=QT_QPA_PLATFORM=offscreen \
             org.DolphinEmu.dolphin-emu -b -v Null -a HLE \
             -u "$USER_DIR/$name" -e "$iso" >"$log" 2>&1
     else
-        timeout -s KILL -k 2 "$RUN_SECS" \
+        "$TIMEOUT" -s KILL -k 2 "$RUN_SECS" \
             "$DOLPHIN_BIN" -v Null -a HLE \
             -u "$USER_DIR/$name" -e "$iso" >"$log" 2>&1
     fi

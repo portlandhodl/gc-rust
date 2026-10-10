@@ -1,0 +1,6 @@
+# Keep LF everywhere (Windows checkouts too): shell scripts, linker scripts
+# and banner.txt must be byte-identical on every OS.
+* text=auto eol=lf
+*.ppm binary
+*.png binary
+*.gif binary
